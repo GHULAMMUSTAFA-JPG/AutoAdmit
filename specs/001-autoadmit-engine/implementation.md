@@ -78,3 +78,4 @@ tests/integration/test_p6_tracking.py::test_p6_imap_inbound_reply_header_matchin
 
 3. **Access Dashboard:**
    Open `http://localhost:8000` and authenticate with `admin` / `autoadmit_secure_pass_2026`.
+

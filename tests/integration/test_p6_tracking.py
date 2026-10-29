@@ -70,3 +70,4 @@ def test_p6_imap_inbound_reply_header_matching():
     assert inbound_reply.draft_id == "draft-999"
     assert inbound_reply.in_reply_to == sent_message_id
     assert 3.0 <= inbound_reply.reply_latency_hours <= 3.5
+

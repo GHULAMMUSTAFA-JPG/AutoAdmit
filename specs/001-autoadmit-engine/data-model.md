@@ -97,3 +97,4 @@
 - `snippet`: string
 - `received_at`: datetime (UTC)
 - `reply_latency_hours`: float
+

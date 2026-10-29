@@ -205,3 +205,4 @@ d:\Sch\
 4. **P4 Test (`test_p4_llm_agent.py`):** Tests prompt synthesis, checks word count (<200 words), confirms GPA is omitted and applied AI is spotlighted, and verifies draft status is `PENDING_REVIEW`.
 5. **P5 Test (`test_p5_safety.py`):** Verifies Master Kill-Switch aborts SMTP dispatch with `403 Forbidden` and zero network traffic; verifies Sandbox Mode overrides recipient.
 6. **P6 Test (`test_p6_tracking.py`):** Tests 1x1 tracking pixel hit logging and IMAP poller header matching (`In-Reply-To`/`References`) updating status to `REPLIED`.
+

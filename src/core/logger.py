@@ -78,3 +78,4 @@ def setup_logger(module_name: str) -> logging.Logger:
         logger.addHandler(ws_handler)
 
     return logger
+

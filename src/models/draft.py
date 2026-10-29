@@ -47,3 +47,4 @@ class DraftApprovalRequest(BaseModel):
 
 class DraftRejectionRequest(BaseModel):
     rejection_reason: str
+

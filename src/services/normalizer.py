@@ -67,3 +67,4 @@ class DataNormalizer:
 
 
 normalizer = DataNormalizer()
+

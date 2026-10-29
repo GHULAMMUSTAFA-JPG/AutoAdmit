@@ -80,3 +80,4 @@ class Settings(BaseSettings):
 # Global singleton settings instance
 settings = Settings()
 settings.ensure_storage_paths()
+

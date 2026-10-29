@@ -488,3 +488,4 @@ window.addEventListener("DOMContentLoaded", () => {
   setInterval(syncCSTClock, 10000);
   initWebSocket();
 });
+

@@ -68,3 +68,4 @@ def test_p2_supervisor_qualification_filtering():
     )
 
     assert rejected_profile is None
+

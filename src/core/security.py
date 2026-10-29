@@ -36,3 +36,4 @@ def verify_credentials(
         detail="Unauthorized access. Valid Basic Auth or Bearer Token required.",
         headers={"WWW-Authenticate": "Basic"}
     )
+

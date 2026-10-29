@@ -73,3 +73,4 @@ def test_p4_guardrail_validator_rejection():
     long_text = "word " * 250
     with pytest.raises(SynthesisGuardrailViolation):
         agent.validate_draft_guardrails(long_text)
+

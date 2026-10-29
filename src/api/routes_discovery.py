@@ -81,3 +81,4 @@ def approve_cost_gate(user: str = Depends(get_current_user)):
     approved_estimate = discovery_engine.approve_estimate(estimate)
     active_estimates[estimate_id] = (approved_estimate, endpoints)
     return approved_estimate
+

@@ -96,3 +96,4 @@ async def poll_inbound_replies(user: str = Depends(get_current_user)):
 
     detected = await imap_harvester.poll_inbox_sync(sent_map)
     return detected
+

@@ -20,3 +20,4 @@ def get_current_user(user: str = Depends(verify_credentials)) -> str:
 def get_db() -> Any:
     """Returns database manager instance."""
     return db_manager
+

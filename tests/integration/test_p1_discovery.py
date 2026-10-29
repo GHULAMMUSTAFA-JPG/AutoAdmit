@@ -58,3 +58,4 @@ def test_p1_pre_run_cost_gate_locking(client: TestClient, auth_headers: dict):
     appr_res = client.post("/api/v1/discovery/approve", headers=auth_headers)
     assert appr_res.status_code == 200
     assert appr_res.json()["is_approved"] is True
+

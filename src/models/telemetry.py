@@ -41,3 +41,4 @@ class CampaignAnalytics(BaseModel):
     average_reply_latency_hours: float = 0.0
     master_gate_active: bool = True
     sandbox_mode: bool = True
+

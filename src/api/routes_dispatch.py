@@ -131,3 +131,4 @@ async def send_batch_queue(
 
     dispatched = await smtp_engine.send_batch(candidates, apply_jitter=not request.dry_run)
     return dispatched
+

@@ -30,3 +30,4 @@ def test_p3_content_hash_integrity():
     assert hash_a1 == hash_a2
     assert hash_a1 != hash_b
     assert len(hash_a1) == 64
+

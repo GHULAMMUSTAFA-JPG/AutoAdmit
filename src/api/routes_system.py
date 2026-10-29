@@ -84,3 +84,4 @@ async def websocket_log_stream(websocket: WebSocket):
         logger.info("WebSocket log subscriber disconnected.")
     except Exception:
         active_log_websockets.discard(websocket)
+

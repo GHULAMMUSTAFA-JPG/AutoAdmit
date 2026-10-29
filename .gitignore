@@ -16,3 +16,4 @@ htmlcov/
 # Playwright & Browser artifacts
 .playwright/
 test-results/
+

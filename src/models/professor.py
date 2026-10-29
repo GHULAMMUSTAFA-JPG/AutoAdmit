@@ -42,3 +42,4 @@ class FacultyProfile(BaseModel):
     worker_id: str = Field(..., description="Worker process ID for audit lineage")
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     extraction_status: ExtractionStatus = Field(default=ExtractionStatus.VERIFIED)
+

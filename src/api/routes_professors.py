@@ -141,3 +141,4 @@ async def trigger_draft_creation(profile: FacultyProfile):
             )
     except Exception as e:
         logger.error(f"Async draft generation error for {profile.name}: {e}")
+

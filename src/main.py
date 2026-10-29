@@ -79,3 +79,4 @@ async def serve_dashboard():
     if index_file.exists():
         return FileResponse(index_file)
     return {"message": "AutoAdmit Engine API running. Dashboard UI files initializing."}
+

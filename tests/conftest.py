@@ -28,3 +28,4 @@ def auth_headers():
     creds = f"{settings.BASIC_AUTH_USERNAME}:{settings.BASIC_AUTH_PASSWORD}"
     token = base64.b64encode(creds.encode("utf-8")).decode("utf-8")
     return {"Authorization": f"Basic {token}"}
+
