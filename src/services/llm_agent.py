@@ -24,21 +24,54 @@ class GeminiSynthesisAgent:
         self.api_key = api_key or settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY", "")
         self.model_name = model_name or settings.GEMINI_MODEL
         self._client = None
+        self._is_new_sdk = False
         self._init_client()
 
     def _init_client(self):
-        """Initializes the Google Generative AI client if API key is provided."""
+        """Initializes the Google GenAI client if API key is provided."""
         if self.api_key:
+            # 1. Prefer modern google.genai SDK
+            try:
+                from google import genai
+                self._client = genai.Client(api_key=self.api_key)
+                self._is_new_sdk = True
+                logger.info(f"Initialized modern Google GenAI Client (Model: {self.model_name})")
+                return
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.warning(f"Failed initializing google.genai: {e}")
+
+            # 2. Fallback to legacy google.generativeai if necessary
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.api_key)
                 self._client = genai.GenerativeModel(self.model_name)
-                logger.info(f"Initialized Gemini model: {self.model_name}")
+                self._is_new_sdk = False
+                logger.info(f"Initialized legacy GenerativeModel: {self.model_name}")
             except Exception as e:
                 logger.warning(f"Could not configure Google GenAI client: {e}. Will use structured deterministic generator.")
                 self._client = None
         else:
             logger.info("No GEMINI_API_KEY configured. Operating with deterministic empirical synthesizer.")
+
+    def _call_gemini(self, prompt: str) -> Optional[str]:
+        """Unified caller across both google.genai and legacy google.generativeai SDKs."""
+        if not self._client:
+            return None
+        try:
+            if self._is_new_sdk:
+                response = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt
+                )
+                return response.text.strip() if response.text else None
+            else:
+                response = self._client.generate_content(prompt)
+                return response.text.strip() if response.text else None
+        except Exception as e:
+            logger.warning(f"Gemini API generation failed: {e}. Falling back to deterministic generator.")
+            return None
 
     async def generate_research_digest(self, profile: FacultyProfile) -> str:
         """
@@ -61,14 +94,9 @@ class GeminiSynthesisAgent:
             f"Digest (2-3 sentences max):"
         )
 
-        if self._client:
-            try:
-                response = self._client.generate_content(prompt)
-                digest = response.text.strip()
-                if digest:
-                    return digest
-            except Exception as e:
-                logger.warning(f"Gemini API call failed for digest: {e}. Using deterministic fallback.")
+        gemini_text = self._call_gemini(prompt)
+        if gemini_text:
+            return gemini_text
 
         # Grounded empirical fallback
         primary_area = profile.research_areas[0] if profile.research_areas else "Artificial Intelligence"
@@ -113,18 +141,14 @@ class GeminiSynthesisAgent:
         subject = f"Prospective CSC Master's Student - Research Alignment in {profile.research_areas[0] if profile.research_areas else 'AI Systems'}"
         body = ""
 
-        if self._client:
-            try:
-                response = self._client.generate_content(prompt)
-                text = response.text.strip()
-                if "SUBJECT:" in text and "BODY:" in text:
-                    parts = text.split("BODY:")
-                    subject = parts[0].replace("SUBJECT:", "").strip()
-                    body = parts[1].strip()
-                else:
-                    body = text
-            except Exception as e:
-                logger.warning(f"Gemini API call failed for outreach draft: {e}. Using deterministic fallback.")
+        gemini_text = self._call_gemini(prompt)
+        if gemini_text:
+            if "SUBJECT:" in gemini_text and "BODY:" in gemini_text:
+                parts = gemini_text.split("BODY:")
+                subject = parts[0].replace("SUBJECT:", "").strip()
+                body = parts[1].strip()
+            else:
+                body = gemini_text
 
         if not body:
             primary_topic = profile.research_areas[0] if profile.research_areas else "AI Systems"
