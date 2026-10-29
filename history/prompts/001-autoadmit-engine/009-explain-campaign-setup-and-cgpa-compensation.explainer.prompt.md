@@ -49,3 +49,4 @@ Explained the function of Tab 1 (Intake, Pre-run cost estimation gate, and profi
 - Graders run and results (PASS/FAIL): PASS
 - Prompt variant (if applicable): default
 - Next experiment (smallest change to try): Add editable profile inputs if user requests dynamic CGPA configuration.
+

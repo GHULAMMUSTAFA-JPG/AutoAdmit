@@ -1,9 +1,10 @@
 """System health, safety gate toggles, and real-time WebSocket log streaming."""
 
+import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
 from src.api.deps import get_current_user
@@ -13,6 +14,31 @@ from src.core.logger import active_log_websockets, setup_logger
 
 router = APIRouter(prefix="/api/v1/system", tags=["System"])
 logger = setup_logger("SystemAPI")
+
+
+class LoginRequest(BaseModel):
+    password: str
+    username: Optional[str] = None
+
+
+@router.post("/login")
+def login(request: LoginRequest):
+    """Password-based authentication endpoint for the web dashboard."""
+    username = request.username or settings.BASIC_AUTH_USERNAME
+    correct_user = secrets.compare_digest(username, settings.BASIC_AUTH_USERNAME)
+    correct_pass = secrets.compare_digest(request.password, settings.BASIC_AUTH_PASSWORD)
+
+    if correct_user and correct_pass:
+        return {
+            "status": "authenticated",
+            "username": username,
+            "token": settings.JWT_SECRET_KEY,
+            "message": "Access granted."
+        }
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid password. Access denied."
+    )
 
 
 class SafetyToggleRequest(BaseModel):
