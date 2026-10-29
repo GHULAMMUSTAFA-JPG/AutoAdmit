@@ -56,3 +56,4 @@ Explained the 403 error (missing root route mapping for `/ws/logs` in FastAPI, c
 - Graders run and results (PASS/FAIL): PASS
 - Prompt variant (if applicable): default
 - Next experiment (smallest change to try): Reload browser at localhost:8000 to see new sidebar layout.
+

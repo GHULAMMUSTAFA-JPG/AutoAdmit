@@ -1,6 +1,7 @@
 """Logging infrastructure with rotating file handlers and WebSocket real-time log streaming."""
 
 import asyncio
+from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -20,8 +21,13 @@ class WebSocketLogHandler(logging.Handler):
             return
 
         try:
+            timestamp = (
+                self.formatter.formatTime(record)
+                if self.formatter
+                else datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+            )
             log_entry = {
-                "timestamp": self.formatTime(record),
+                "timestamp": timestamp,
                 "level": record.levelname,
                 "module": record.name,
                 "message": record.getMessage()
