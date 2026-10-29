@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoAdmit Engine — Strategic Discovery & Outreach</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation & Safety Bar -->
+  <header class="top-nav">
+    <div class="brand">
+      <span class="brand-icon">⚡</span>
+      <span class="brand-name">AutoAdmit Engine</span>
+      <span class="badge version">v1.0.0</span>
+    </div>
+
+    <div class="safety-bar">
+      <!-- Master Kill-Switch -->
+      <div class="safety-toggle-group">
+        <span class="safety-label">Master Kill-Switch:</span>
+        <button id="btn-master-gate" class="btn-toggle gate-active" onclick="toggleMasterGate()">ACTIVE (SAFE)</button>
+      </div>
+
+      <!-- Sandbox Mode -->
+      <div class="safety-toggle-group">
+        <span class="safety-label">Sandbox Mode:</span>
+        <button id="btn-sandbox-mode" class="btn-toggle sandbox-on" onclick="toggleSandboxMode()">ON</button>
+      </div>
+
+      <!-- CST Clock -->
+      <div class="cst-clock-container">
+        <span class="clock-icon">🕒</span>
+        <span id="cst-clock">--:--:-- CST</span>
+        <span id="cst-window-badge" class="badge window-closed">CST Window: Checked</span>
+      </div>
+
+      <!-- Volume Mount Indicator -->
+      <div class="mount-status">
+        <span class="dot active"></span>
+        <span id="storage-indicator">Volume: Persistent</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Application Tabs Navigation -->
+  <nav class="tabs-nav">
+    <button class="tab-btn active" onclick="switchTab('tab-setup')">1. Campaign Setup & Cost</button>
+    <button class="tab-btn" onclick="switchTab('tab-universities')">2. University Feasibility</button>
+    <button class="tab-btn" onclick="switchTab('tab-faculty')">3. Faculty Roster</button>
+    <button class="tab-btn" onclick="switchTab('tab-review')">4. Email Review Workspace</button>
+    <button class="tab-btn" onclick="switchTab('tab-dispatch')">5. Outbox & Scheduler</button>
+    <button class="tab-btn" onclick="switchTab('tab-analytics')">6. Analytics & Replies</button>
+    <button class="tab-btn" onclick="switchTab('tab-terminal')">7. Terminal & Logs</button>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="main-container">
+
+    <!-- Tab 1: Campaign Setup & Resource Estimation -->
+    <section id="tab-setup" class="tab-content active">
+      <div class="card">
+        <h2>Campaign Configuration & Feasibility Inputs</h2>
+        <p class="subtitle">Curate target university department endpoints and configure profile compensation parameters (2.68 CGPA).</p>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="intake-urls">Target Department Directory URLs (.edu.cn only):</label>
+            <textarea id="intake-urls" rows="6" placeholder="http://cs.tsinghua.edu.cn/faculty&#10;http://ai.pku.edu.cn/supervisors&#10;http://cst.zju.edu.cn/teachers"></textarea>
+            <span class="hint">One URL per line. Must be official accredited Chinese university domains.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Empirical Profile Compensation Reality:</label>
+            <div class="profile-card">
+              <div class="profile-item"><strong>Target Degree:</strong> Master's in CS / AI</div>
+              <div class="profile-item"><strong>CGPA:</strong> <span class="badge warning">2.68 (Compensated)</span></div>
+              <div class="profile-item"><strong>Focus Strengths:</strong> PyTorch, Agentic AI, Biometrics, Deployed Systems</div>
+              <div class="profile-item"><strong>Financial Directive:</strong> Independent CSC Type B & Presidential Scholarships</div>
+            </div>
+            <button class="btn btn-primary mt-3" onclick="calculateCostEstimate()">Calculate Pre-Run Cost Estimate</button>
+          </div>
+        </div>
+
+        <!-- Pre-run Cost Gate Modal / Box -->
+        <div id="cost-estimate-card" class="cost-card hidden">
+          <h3>Pre-Run Cost & Workload Breakdown</h3>
+          <div class="metrics-grid">
+            <div class="metric-box">
+              <span class="label">Target Departments</span>
+              <span id="est-depts" class="val">0</span>
+            </div>
+            <div class="metric-box">
+              <span class="label">Estimated Pages</span>
+              <span id="est-pages" class="val">0</span>
+            </div>
+            <div class="metric-box">
+              <span class="label">Est. Faculty Profiles</span>
+              <span id="est-faculty" class="val">0</span>
+            </div>
+            <div class="metric-box">
+              <span class="label">Est. Gemini Tokens</span>
+              <span id="est-tokens" class="val">0</span>
+            </div>
+            <div class="metric-box">
+              <span class="label">Est. Runtime</span>
+              <span id="est-runtime" class="val">0s</span>
+            </div>
+          </div>
+          <div class="gate-actions">
+            <div class="gate-status">
+              <span class="status-indicator locked"></span> Gate Status: <strong id="gate-status-text">LOCKED (Approval Required)</strong>
+            </div>
+            <button id="btn-approve-gate" class="btn btn-success" onclick="approveCostGate()">Approve & Start Discovery</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: University & Feasibility Directory -->
+    <section id="tab-universities" class="tab-content">
+      <div class="card">
+        <h2>University Feasibility & Scholarship Matrix</h2>
+        <p class="subtitle">Strategic evaluation compensating for 2.68 CGPA cutoffs through Tier 1 Dream, Tier 2 Target, and Tier 3 Safety classification.</p>
+        
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>University Name</th>
+                <th>Native Name</th>
+                <th>Domain</th>
+                <th>CS Rank</th>
+                <th>Feasibility Tier</th>
+                <th>Scholarships Available</th>
+                <th>App Fee</th>
+                <th>Outreach Strategy</th>
+              </tr>
+            </thead>
+            <tbody id="universities-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3: Faculty Roster & Extraction Stream -->
+    <section id="tab-faculty" class="tab-content">
+      <div class="card">
+        <div class="flex-between">
+          <div>
+            <h2>Verified Graduate Supervisors Roster</h2>
+            <p class="subtitle">Faculty verified with Master's (硕导) or Ph.D. (博导) supervisory credentials from official .edu.cn sources.</p>
+          </div>
+          <div>
+            <button class="btn btn-secondary" onclick="loadFaculty()">Refresh Roster</button>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Supervisor Name</th>
+                <th>University</th>
+                <th>Department</th>
+                <th>Qualification</th>
+                <th>Email</th>
+                <th>Research Areas</th>
+                <th>Audit Hash</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody id="faculty-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4: Email Review Workspace & Approval Staging -->
+    <section id="tab-review" class="tab-content">
+      <div class="card">
+        <h2>Split-Pane Email Review & Approval Staging</h2>
+        <p class="subtitle">Review Gemini-synthesized research digests and edit personalized cold outreach drafts (<200 words).</p>
+
+        <div class="split-pane">
+          <!-- Left: Faculty Digest & Context -->
+          <div class="pane pane-left">
+            <h3>Faculty Synthesis Digest</h3>
+            <div class="form-group">
+              <label>Select Draft to Review:</label>
+              <select id="select-draft" class="form-control" onchange="onDraftSelected()">
+                <option value="">-- Choose a pending draft --</option>
+              </select>
+            </div>
+
+            <div id="review-profile-details" class="details-box">
+              <p><strong>Target Professor:</strong> <span id="rev-prof-name">-</span></p>
+              <p><strong>University:</strong> <span id="rev-prof-univ">-</span></p>
+              <p><strong>Email:</strong> <span id="rev-prof-email">-</span></p>
+              <hr/>
+              <p><strong>Factual Research Digest:</strong></p>
+              <p id="rev-prof-digest" class="digest-text">Select a draft to view the synthesized lab research digest.</p>
+            </div>
+          </div>
+
+          <!-- Right: Editable Outreach Draft -->
+          <div class="pane pane-right">
+            <h3>Customized Outreach Email (<200 Words)</h3>
+            <div class="form-group">
+              <label for="rev-subject">Subject Line:</label>
+              <input type="text" id="rev-subject" class="form-control" />
+            </div>
+
+            <div class="form-group">
+              <label for="rev-body">Email Body (Plain Text):</label>
+              <textarea id="rev-body" rows="12" class="form-control" oninput="updateWordCount()"></textarea>
+              <div class="flex-between mt-1">
+                <span class="hint">Words: <strong id="word-count">0</strong> / 200 max. Forbidden: GPA mentions.</span>
+                <span id="draft-status-badge" class="badge">PENDING_REVIEW</span>
+              </div>
+            </div>
+
+            <div class="review-actions mt-3">
+              <button class="btn btn-success" onclick="approveCurrentDraft()">Approve for Dispatch</button>
+              <button class="btn btn-warning" onclick="regenerateCurrentDraft()">Regenerate with Gemini</button>
+              <button class="btn btn-danger" onclick="rejectCurrentDraft()">Discard Draft</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 5: Outbox Dispatcher & Delivery Scheduler -->
+    <section id="tab-dispatch" class="tab-content">
+      <div class="card">
+        <h2>Outbox Dispatcher & Smart Delivery Scheduler</h2>
+        <p class="subtitle">Strictly sends APPROVED drafts within CST working hours (09:00 - 16:30) with 90-240s randomized jitter.</p>
+
+        <div class="grid-2">
+          <div class="queue-summary">
+            <h3>Approved Queue Summary</h3>
+            <p>Drafts Approved & Ready: <strong id="approved-count">0</strong></p>
+            <div class="btn-group mt-2">
+              <button class="btn btn-primary" onclick="sendBatch(false)">Dispatch Batch (With Jitter)</button>
+              <button class="btn btn-secondary" onclick="sendBatch(true)">Dry-Run Test Batch</button>
+            </div>
+          </div>
+
+          <div class="scheduler-params">
+            <h3>Delivery Protocols & Limits</h3>
+            <ul>
+              <li><strong>CST Window:</strong> 09:00 – 16:30 China Standard Time (UTC+8)</li>
+              <li><strong>Hourly Cap:</strong> Max 10 emails/hour</li>
+              <li><strong>Daily Cap:</strong> Max 25 emails/day</li>
+              <li><strong>Jitter Pause:</strong> 90 to 240 seconds randomized</li>
+              <li><strong>Attachments:</strong> Auto-attaches Academic CV (PDF)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+          <h3>Approved Dispatch Queue</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Draft ID</th>
+                <th>Recipient</th>
+                <th>University</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="dispatch-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 6: Analytics & Response Tracker -->
+    <section id="tab-analytics" class="tab-content">
+      <div class="card">
+        <div class="flex-between">
+          <div>
+            <h2>Campaign Analytics & Response Tracker</h2>
+            <p class="subtitle">Pixel open receipts and IMAP inbound reply telemetry matching.</p>
+          </div>
+          <div>
+            <button class="btn btn-secondary" onclick="pollIMAPReplies()">Poll IMAP Inbox Now</button>
+          </div>
+        </div>
+
+        <div class="metrics-grid mt-3">
+          <div class="metric-box">
+            <span class="label">Total Discovered</span>
+            <span id="metric-discovered" class="val">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="label">Approved</span>
+            <span id="metric-approved" class="val">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="label">Total Sent (250 OK)</span>
+            <span id="metric-sent" class="val">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="label">Opened (Pixel)</span>
+            <span id="metric-opened" class="val">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="label">Responses Received</span>
+            <span id="metric-replies" class="val">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="label">Avg Reply Latency</span>
+            <span id="metric-latency" class="val">0.0h</span>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-4">
+          <h3>Inbound Responses Detected via IMAP</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Professor</th>
+                <th>From Address</th>
+                <th>Subject</th>
+                <th>Snippet</th>
+                <th>Received At</th>
+                <th>Latency</th>
+              </tr>
+            </thead>
+            <tbody id="replies-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 7: System Terminal & Live Log Streaming -->
+    <section id="tab-terminal" class="tab-content">
+      <div class="card">
+        <div class="flex-between">
+          <div>
+            <h2>System Terminal & Live WebSocket Log Stream</h2>
+            <p class="subtitle">Real-time trace logs isolated across Scraper, Normalizer, LLMAgent, SMTPEngine, and IMAPHarvester.</p>
+          </div>
+          <div>
+            <select id="log-filter" class="form-control" onchange="filterLogs()">
+              <option value="ALL">All Modules</option>
+              <option value="ScraperWorker">ScraperWorker</option>
+              <option value="Normalizer">Normalizer</option>
+              <option value="LLMAgent">LLMAgent</option>
+              <option value="SMTPEngine">SMTPEngine</option>
+              <option value="IMAPHarvester">IMAPHarvester</option>
+            </select>
+            <button class="btn btn-secondary ml-2" onclick="clearTerminal()">Clear</button>
+          </div>
+        </div>
+
+        <div id="terminal-window" class="terminal-box">
+          <div class="terminal-line system">[SYSTEM] WebSocket log stream initialized. Awaiting worker activity...</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

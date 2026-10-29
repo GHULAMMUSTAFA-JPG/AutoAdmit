@@ -1,0 +1,18 @@
+# Environment & secrets
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Persistent runtime data & logs
+data/
+*.log
+
+# Pytest & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright & Browser artifacts
+.playwright/
+test-results/
