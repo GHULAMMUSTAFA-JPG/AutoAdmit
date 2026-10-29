@@ -29,6 +29,7 @@ class University(BaseModel):
     name: str = Field(..., description="English Name of University")
     chinese_name: Optional[str] = Field(default=None, description="Native Chinese name")
     domain: str = Field(..., description="Official educational domain e.g. tsinghua.edu.cn")
+    region: str = Field(default="National", description="Province or Municipal Region in China (e.g., Beijing, Shanghai, Jiangsu)")
     tier: FeasibilityTier = Field(..., description="Dream / Target / Safety tier")
     cs_ranking: Optional[int] = Field(default=None, description="National or global CS ranking")
     is_project_985: bool = Field(default=False)

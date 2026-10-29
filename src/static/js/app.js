@@ -4,6 +4,7 @@ const API_BASE = "";
 let currentDrafts = [];
 let selectedDraft = null;
 let currentFilter = "ALL";
+let lastDiscoveredUniversities = [];
 
 // Retrieve saved authentication header from localStorage or prompt
 let authHeader = localStorage.getItem("autoadmit_auth") || "";
@@ -220,7 +221,118 @@ async function syncCSTClock() {
   }
 }
 
-// Tab 1: Calculate Pre-Run Cost Estimate
+// Tab 1 Discovery Mode Switcher
+function switchDiscoveryMode(mode) {
+  const btnAuto = document.getElementById("btn-mode-auto");
+  const btnManual = document.getElementById("btn-mode-manual");
+  const autoBox = document.getElementById("mode-auto-container");
+  const manualBox = document.getElementById("mode-manual-container");
+
+  if (mode === "auto") {
+    if (btnAuto) btnAuto.className = "btn btn-primary mr-2";
+    if (btnManual) btnManual.className = "btn btn-secondary";
+    if (autoBox) autoBox.classList.remove("hidden");
+    if (manualBox) manualBox.classList.add("hidden");
+  } else {
+    if (btnAuto) btnAuto.className = "btn btn-secondary mr-2";
+    if (btnManual) btnManual.className = "btn btn-primary";
+    if (autoBox) autoBox.classList.add("hidden");
+    if (manualBox) manualBox.classList.remove("hidden");
+  }
+}
+
+// Tab 1: Automated Regional & Rank Discovery
+async function runRegionalFilter() {
+  const regionSelect = document.getElementById("filter-regions");
+  const selectedRegions = Array.from(regionSelect.selectedOptions).map(o => o.value);
+  const tier = document.getElementById("filter-tier").value;
+  const discipline = document.getElementById("filter-discipline").value;
+
+  const payload = {
+    regions: selectedRegions.includes("All") ? null : selectedRegions,
+    tiers: tier === "All" ? null : [tier],
+    discipline: discipline
+  };
+
+  try {
+    const res = await fetchWithAuth("/api/v1/discovery/filter", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const universities = await res.json();
+    lastDiscoveredUniversities = universities;
+
+    const countEl = document.getElementById("matched-univ-count");
+    if (countEl) countEl.textContent = universities.length;
+
+    const tbody = document.getElementById("matched-endpoints-tbody");
+    tbody.innerHTML = "";
+
+    universities.forEach(u => {
+      const tr = document.createElement("tr");
+      const endpointsHtml = (u.department_endpoints || []).map(ep => 
+        `<div style="margin-bottom: 3px;"><span class="badge version">${ep.name}</span> <code style="font-size: 0.75rem;">${ep.url}</code></div>`
+      ).join("");
+
+      tr.innerHTML = `
+        <td><strong>${u.name}</strong> <span style="font-size: 0.8rem; color: #888;">(${u.chinese_name || ""})</span></td>
+        <td><span class="badge ${u.region === 'Beijing' || u.region === 'Shanghai' ? 'status-staged' : 'status-sent'}">${u.region}</span></td>
+        <td><span class="badge ${u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
+        <td>${endpointsHtml}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    const container = document.getElementById("discovered-endpoints-container");
+    if (container) container.classList.remove("hidden");
+  } catch (err) {
+    alert("Error discovering universities: " + err);
+  }
+}
+
+// Tab 1: Prepare Pre-Run Estimate for Matched Universities
+async function prepareEstimateForMatched() {
+  if (!lastDiscoveredUniversities || lastDiscoveredUniversities.length === 0) {
+    alert("No universities matched. Run search first.");
+    return;
+  }
+
+  // Flatten all endpoints
+  const allEndpoints = [];
+  lastDiscoveredUniversities.forEach(u => {
+    (u.department_endpoints || []).forEach(ep => {
+      allEndpoints.push(ep);
+    });
+  });
+
+  try {
+    const res = await fetchWithAuth("/api/v1/discovery/estimate", {
+      method: "POST",
+      body: JSON.stringify(allEndpoints)
+    });
+    const est = await res.json();
+
+    const univEl = document.getElementById("est-univs");
+    if (univEl) univEl.textContent = lastDiscoveredUniversities.length;
+    document.getElementById("est-depts").textContent = est.total_target_departments;
+    document.getElementById("est-pages").textContent = est.estimated_pages_to_crawl;
+    document.getElementById("est-faculty").textContent = est.estimated_faculty_count;
+    document.getElementById("est-tokens").textContent = est.estimated_gemini_tokens.toLocaleString();
+    document.getElementById("est-runtime").textContent = est.estimated_runtime_seconds + "s";
+
+    const card = document.getElementById("cost-estimate-card");
+    if (card) card.classList.remove("hidden");
+    document.getElementById("gate-status-text").textContent = "LOCKED (Approval Required)";
+  } catch (err) {
+    alert("Error generating estimate: " + err);
+  }
+}
+
+function calculateCostEstimateFromUrls() {
+  calculateCostEstimate();
+}
+
+// Tab 1: Calculate Pre-Run Cost Estimate (Direct URLs)
 async function calculateCostEstimate() {
   const text = document.getElementById("intake-urls").value.trim();
   const urls = text.split("\n").map(u => u.trim()).filter(u => u.length > 0);
@@ -242,6 +354,8 @@ async function calculateCostEstimate() {
     });
     const est = await res.json();
 
+    const univEl = document.getElementById("est-univs");
+    if (univEl) univEl.textContent = "1+";
     document.getElementById("est-depts").textContent = est.total_target_departments;
     document.getElementById("est-pages").textContent = est.estimated_pages_to_crawl;
     document.getElementById("est-faculty").textContent = est.estimated_faculty_count;
@@ -256,26 +370,40 @@ async function calculateCostEstimate() {
   }
 }
 
-// Approve Gate & Start Discovery
+// Approve Gate & Start Parallel Discovery / Extraction
 async function approveCostGate() {
   try {
     const res = await fetchWithAuth("/api/v1/discovery/approve", { method: "POST" });
     const est = await res.json();
     if (est.is_approved) {
       document.getElementById("gate-status-text").textContent = "UNLOCKED & APPROVED";
-      alert("Cost Gate Approved! Launching scraping and extraction workers.");
+      alert("Cost Gate Approved! Launching parallel scraping workers for Master's supervisors (硕导).");
       
-      const text = document.getElementById("intake-urls").value.trim();
-      const urls = text.split("\n").map(u => u.trim()).filter(u => u.length > 0);
-      
-      await fetchWithAuth("/api/v1/professors/harvest", {
-        method: "POST",
-        body: JSON.stringify({
-          department_urls: urls,
-          university_name: "Target University",
-          department_name: "School of Computer Science"
-        })
-      });
+      if (lastDiscoveredUniversities && lastDiscoveredUniversities.length > 0) {
+        // Multi-university parallel harvest
+        const targets = lastDiscoveredUniversities.map(u => ({
+          university_name: u.name,
+          department_name: "School of Computer Science & AI",
+          department_urls: (u.department_endpoints || []).map(ep => ep.url)
+        }));
+
+        await fetchWithAuth("/api/v1/professors/harvest-batch", {
+          method: "POST",
+          body: JSON.stringify({ targets: targets })
+        });
+      } else {
+        const text = document.getElementById("intake-urls").value.trim();
+        const urls = text.split("\n").map(u => u.trim()).filter(u => u.length > 0);
+        
+        await fetchWithAuth("/api/v1/professors/harvest", {
+          method: "POST",
+          body: JSON.stringify({
+            department_urls: urls,
+            university_name: "Target University",
+            department_name: "School of Computer Science"
+          })
+        });
+      }
       loadFaculty();
     }
   } catch (err) {

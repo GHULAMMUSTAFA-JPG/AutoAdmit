@@ -121,47 +121,117 @@
     <!-- Tab 1: Campaign Setup & Resource Estimation -->
     <section id="tab-setup" class="tab-content active">
       <div class="card">
-        <h2>Campaign Configuration & Feasibility Inputs</h2>
-        <p class="subtitle">Curate target university department endpoints and configure profile compensation parameters (2.68 CGPA).</p>
+        <h2>Discovery Configuration & Pre-Run Cost Gate</h2>
+        <p class="subtitle">Discover Chinese universities by Region & Rank, resolve official department portals, and launch parallel workers to harvest Master's supervisors (硕导).</p>
 
-        <div class="grid-2">
-          <div class="form-group">
-            <label for="intake-urls">Target Department Directory URLs (.edu.cn only):</label>
-            <textarea id="intake-urls" rows="6" placeholder="http://cs.tsinghua.edu.cn/faculty&#10;http://ai.pku.edu.cn/supervisors&#10;http://cst.zju.edu.cn/teachers"></textarea>
-            <span class="hint">One URL per line. Must be official accredited Chinese university domains.</span>
-          </div>
+        <!-- Discovery Mode Selector -->
+        <div class="tabs-subnav mb-3">
+          <button id="btn-mode-auto" class="btn btn-primary mr-2" onclick="switchDiscoveryMode('auto')">🌐 Automated Regional Discovery</button>
+          <button id="btn-mode-manual" class="btn btn-secondary" onclick="switchDiscoveryMode('manual')">📋 Direct URL Intake</button>
+        </div>
 
-          <div class="form-group">
-            <label>Empirical Profile Compensation Reality:</label>
-            <div class="profile-card">
-              <div class="profile-item"><strong>Target Degree:</strong> Master's in CS / AI</div>
-              <div class="profile-item"><strong>CGPA:</strong> <span class="badge warning">2.68 (Compensated)</span></div>
-              <div class="profile-item"><strong>Focus Strengths:</strong> PyTorch, Agentic AI, Biometrics, Deployed Systems</div>
-              <div class="profile-item"><strong>Financial Directive:</strong> Independent CSC Type B & Presidential Scholarships</div>
+        <!-- Mode A: Automated Discovery by Region & Rank -->
+        <div id="mode-auto-container" class="discovery-mode-box">
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="filter-regions">Target Regions (Provinces / Cities):</label>
+              <select id="filter-regions" class="form-control" multiple size="5">
+                <option value="All" selected>All Major Regions</option>
+                <option value="Beijing">Beijing (Peking, Tsinghua, Beihang, BJTU)</option>
+                <option value="Shanghai">Shanghai (SJTU, Fudan)</option>
+                <option value="Jiangsu">Jiangsu (Nanjing, NUIST, Jiangnan)</option>
+                <option value="Zhejiang">Zhejiang (ZJU)</option>
+                <option value="Shaanxi">Shaanxi (Xi'an Jiaotong, Xidian)</option>
+                <option value="Hubei">Hubei (HUST, Wuhan Univ.)</option>
+                <option value="Guangdong">Guangdong (Sun Yat-sen, SCUT)</option>
+                <option value="Sichuan">Sichuan (UESTC, Sichuan Univ.)</option>
+                <option value="Heilongjiang">Heilongjiang (HIT)</option>
+              </select>
+              <span class="hint">Hold Ctrl to select multiple regions</span>
             </div>
-            <button class="btn btn-primary mt-3" onclick="calculateCostEstimate()">Calculate Pre-Run Cost Estimate</button>
+
+            <div class="form-group">
+              <label for="filter-tier">Feasibility Tier & Competitiveness:</label>
+              <select id="filter-tier" class="form-control">
+                <option value="All">All Tiers (Dream + Target + Safety)</option>
+                <option value="Tier 1 (Dream)">Tier 1: Dream (Top C9 & Project 985)</option>
+                <option value="Tier 2 (Target)">Tier 2: Target (Project 211 & Key Engineering)</option>
+                <option value="Tier 3 (Safety)">Tier 3: Safety (High Quota / Accessible)</option>
+              </select>
+
+              <label for="filter-discipline" class="mt-2">Target Academic Discipline:</label>
+              <select id="filter-discipline" class="form-control">
+                <option value="Computer Science">Computer Science & Engineering</option>
+                <option value="Artificial Intelligence">Artificial Intelligence & Robotics</option>
+                <option value="Software Engineering">Software Engineering</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Applicant Academic Objective:</label>
+              <div class="profile-card">
+                <div class="profile-item"><strong>Target Degree:</strong> Master's in CS / AI</div>
+                <div class="profile-item"><strong>Faculty Target:</strong> Master's Supervisors (硕士生导师 / 硕导)</div>
+                <div class="profile-item"><strong>Technical Strengths:</strong> PyTorch, Agentic AI, Biometrics, Deployed Systems</div>
+                <div class="profile-item"><strong>Scholarship Goal:</strong> CSC Type B / University Presidential Scholarship</div>
+              </div>
+              <button class="btn btn-primary btn-block mt-2" onclick="runRegionalFilter()">Search Universities & Resolve Portals</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode B: Direct URL Input -->
+        <div id="mode-manual-container" class="discovery-mode-box hidden">
+          <div class="form-group">
+            <label for="intake-urls">Paste Target Department Directory URLs (.edu.cn only):</label>
+            <textarea id="intake-urls" rows="5" class="form-control" placeholder="http://cs.tsinghua.edu.cn/faculty&#10;http://ai.pku.edu.cn/supervisors&#10;http://cst.zju.edu.cn/teachers"></textarea>
+            <span class="hint">One URL per line. Must be official accredited Chinese university domains.</span>
+            <button class="btn btn-primary mt-2" onclick="calculateCostEstimateFromUrls()">Calculate Pre-Run Estimate</button>
+          </div>
+        </div>
+
+        <!-- Discovered Universities & Department Endpoints List -->
+        <div id="discovered-endpoints-container" class="mt-3 hidden">
+          <div class="flex-between">
+            <h3>Discovered University Portals (<span id="matched-univ-count">0</span> Universities Resolved)</h3>
+            <button class="btn btn-success" onclick="prepareEstimateForMatched()">Proceed to Cost Gate</button>
+          </div>
+          <div class="table-responsive mt-2">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>University</th>
+                  <th>Region</th>
+                  <th>Tier</th>
+                  <th>Resolved CS/AI Department Endpoints</th>
+                </tr>
+              </thead>
+              <tbody id="matched-endpoints-tbody"></tbody>
+            </table>
           </div>
         </div>
 
         <!-- Pre-run Cost Gate Modal / Box -->
         <div id="cost-estimate-card" class="cost-card hidden">
           <h3>Pre-Run Cost & Workload Breakdown</h3>
+          <p class="subtitle" style="margin-bottom: 0.5rem;">Crawlers and LLM synthesis remain LOCKED until you review and click Approve.</p>
           <div class="metrics-grid">
             <div class="metric-box">
-              <span class="label">Target Departments</span>
+              <span class="label">Universities</span>
+              <span id="est-univs" class="val">0</span>
+            </div>
+            <div class="metric-box">
+              <span class="label">Parallel Crawlers</span>
               <span id="est-depts" class="val">0</span>
             </div>
             <div class="metric-box">
-              <span class="label">Estimated Pages</span>
-              <span id="est-pages" class="val">0</span>
-            </div>
-            <div class="metric-box">
-              <span class="label">Est. Faculty Profiles</span>
+              <span class="label">Est. Master Supervisors</span>
               <span id="est-faculty" class="val">0</span>
             </div>
             <div class="metric-box">
               <span class="label">Est. Gemini Tokens</span>
               <span id="est-tokens" class="val">0</span>
+              <span class="hint" style="font-size: 0.72rem; color: #4fc3f7; display: block; margin-top: 4px;">(Crawling is $0 / 0 tokens; Tokens used ONLY for downstream drafts)</span>
             </div>
             <div class="metric-box">
               <span class="label">Est. Runtime</span>
@@ -172,7 +242,7 @@
             <div class="gate-status">
               <span class="status-indicator locked"></span> Gate Status: <strong id="gate-status-text">LOCKED (Approval Required)</strong>
             </div>
-            <button id="btn-approve-gate" class="btn btn-success" onclick="approveCostGate()">Approve & Start Discovery</button>
+            <button id="btn-approve-gate" class="btn btn-success" onclick="approveCostGate()">Approve & Launch Parallel Harvesters</button>
           </div>
         </div>
       </div>

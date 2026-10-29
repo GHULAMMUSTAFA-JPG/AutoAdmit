@@ -64,12 +64,12 @@ So that data survives notebook reconnections or server reboots, never duplicates
 ### User Story 4 - Gemini LLM Factual Digest & Strategic GPA Compensation Outreach (Priority: P4)
 
 As an applicant whose CGPA (2.68) does not meet traditional paper-screening thresholds,
-I need Gemini 1.5 to synthesize recent publications into an authentic 2-3 sentence research digest and draft a personalized cold email (<200 words) that emphasizes applied AI engineering, systems development, and independent scholarship funding,
-So that professors evaluate my hands-on technical merit and know I require no lab stipend.
+I need Gemini to synthesize recent publications into an authentic 2-3 sentence research digest and draft a personalized cold email (<200 words) that emphasizes applied AI engineering, systems development, and scholarship supervision interest,
+So that professors evaluate my hands-on technical merit and research alignment.
 
-**Why this priority**: Personalized, concise emails that highlight technical competence and guaranteed external funding dramatically boost reply rates.
+**Why this priority**: Personalized, concise emails that highlight technical competence and genuine supervision interest dramatically boost reply rates.
 
-**Independent Test**: Execute synthesis on sample faculty publications; inspect generated drafts to verify word count is <200, no mention of the 2.68 CGPA exists, applied AI/PyTorch experience is highlighted, external scholarship independence is confirmed, and draft status is set to `PENDING_REVIEW`.
+**Independent Test**: Execute synthesis on sample faculty publications; inspect generated drafts to verify word count is <200, no mention of the 2.68 CGPA exists, applied AI/PyTorch experience is highlighted, external scholarship objective (CSC Type B) is stated, and draft status is set to `PENDING_REVIEW`.
 
 **Acceptance Scenarios**:
 1. **Given** a professor's publications in Computer Vision, **When** Gemini generates the research digest, **Then** it accurately identifies the core problem and primary architectures without hallucinating unmentioned topics.

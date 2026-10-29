@@ -125,22 +125,22 @@ class GeminiSynthesisAgent:
         - Status: Locked to PENDING_REVIEW.
         """
         prompt = (
-            f"Write a highly professional, high-conversion cold outreach email from an international graduate applicant "
+            f"Write a professional, high-conversion academic outreach email from a prospective international graduate applicant "
             f"to Professor {profile.name} at {profile.university}.\n\n"
             f"Faculty Research Digest: {research_digest}\n"
             f"Target University: {profile.university}\n\n"
             f"Strict Constraints:\n"
             f"1. Length: MUST be under 200 words total.\n"
-            f"2. GPA Compensation: Highlight hands-on engineering capabilities (Python, PyTorch, Agentic AI architectures, "
-            f"biometric verification, deployed production systems). NEVER mention GPA, grades, or cutoffs.\n"
-            f"3. Financial Independence: Explicitly state the applicant is applying for full external scholarship funding "
-            f"(Chinese Government Scholarship CSC Type B / University Presidential Scholarship) and requires NO financial support or lab stipend.\n"
+            f"2. Practical Alignment: Highlight hands-on technical and engineering capabilities (Python, PyTorch, Agentic AI, "
+            f"biometrics, deployed systems). NEVER mention GPA, grades, or cutoffs.\n"
+            f"3. Scholarship Objective: State your goal to apply for Master's graduate studies under their supervision, "
+            f"seeking their academic support/acceptance for the Chinese Government Scholarship (CSC Type B) or University Scholarship.\n"
             f"4. Format output as:\n"
             f"SUBJECT: [Compelling custom subject line]\n"
             f"BODY: [Email body under 200 words]\n"
         )
 
-        subject = f"Prospective CSC Master's Student - Research Alignment in {profile.research_areas[0] if profile.research_areas else 'AI Systems'}"
+        subject = f"Prospective Master's Student - Research Alignment in {profile.research_areas[0] if profile.research_areas else 'AI Systems'}"
         body = ""
 
         gemini_text = self._call_gemini(prompt)
@@ -154,17 +154,17 @@ class GeminiSynthesisAgent:
 
         if not body:
             primary_topic = profile.research_areas[0] if profile.research_areas else "AI Systems"
-            subject = f"Prospective CSC Master's Student (Full Funding) - {primary_topic} Alignment"
+            subject = f"Prospective CSC Master's Student - {primary_topic} Research Alignment"
             body = (
                 f"Dear Professor {profile.name},\n\n"
                 f"I have closely reviewed your laboratory's work at {profile.university} regarding {primary_topic}. "
-                f"Your focus on empirical architectures and scalable pipelines aligns directly with my engineering background.\n\n"
-                f"As an applied AI developer with extensive hands-on experience building PyTorch models, Agentic AI systems, "
-                f"and biometric verification pipelines, I am eager to contribute to your ongoing research as a Master's student.\n\n"
-                f"To ensure zero financial commitment from your lab, I am applying for full external funding under the "
-                f"Chinese Government Scholarship (CSC Type B) and University Presidential Scholarships, requiring no lab stipend.\n\n"
-                f"Would you be available for a brief 10-minute video conversation or open to reviewing my attached CV and technical portfolio?\n\n"
-                f"Thank you for your time and consideration.\n\n"
+                f"Your research focus on empirical architectures and scalable deep learning systems strongly aligns with my technical background.\n\n"
+                f"As an applied developer with hands-on experience building PyTorch pipelines, Agentic AI systems, and "
+                f"biometric verification models, I am eager to contribute to your ongoing research as a Master's student.\n\n"
+                f"I intend to apply for the Chinese Government Scholarship (CSC Type B) and would be deeply honored to pursue "
+                f"my graduate research under your supervision.\n\n"
+                f"Would you be open to reviewing my attached CV or available for a brief introductory conversation?\n\n"
+                f"Thank you for your time and guidance.\n\n"
                 f"Sincerely,\n"
                 f"{applicant_name}"
             )

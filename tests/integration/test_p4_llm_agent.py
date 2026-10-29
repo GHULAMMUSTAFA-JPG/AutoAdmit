@@ -52,10 +52,10 @@ async def test_p4_research_digest_and_gpa_compensation():
     for term in forbidden_terms:
         assert term not in draft.body_text.lower(), f"Forbidden term '{term}' found in draft body."
 
-    # Guardrail Check 4: Must confirm independent scholarship funding (CSC / Presidential)
+    # Guardrail Check 4: Must mention scholarship / supervision objective
     lower_body = draft.body_text.lower()
     assert "csc" in lower_body or "scholarship" in lower_body
-    assert "stipend" in lower_body or "funding" in lower_body or "financial" in lower_body
+    assert "supervision" in lower_body or "master" in lower_body
 
     # Guardrail Check 5: Highlight engineering strengths
     assert any(skill in lower_body for skill in ["pytorch", "engineering", "ai", "system", "biometric"])

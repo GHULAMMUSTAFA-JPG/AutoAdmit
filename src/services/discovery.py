@@ -14,44 +14,48 @@ from src.models.university import (
 logger = setup_logger("DiscoveryService")
 
 
-# Knowledge base of Chinese Universities with scholarship and barrier metadata
+# Knowledge base of Chinese Universities with scholarship, region, and barrier metadata
 KNOWN_UNIVERSITIES_METADATA: Dict[str, Dict] = {
     "tsinghua.edu.cn": {
         "name": "Tsinghua University",
         "chinese_name": "清华大学",
+        "region": "Beijing",
         "tier": FeasibilityTier.TIER_1_DREAM,
         "cs_ranking": 1,
         "is_project_985": True,
         "is_project_211": True,
         "application_fee_rmb": 800,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. Strict academic screening. Feasibility engine sets outreach focus toward younger Associate Professors or newly established labs requiring hands-on engineering output."
+        "feasibility_notes": "Tier 1 Dream. Strict academic cutoffs. Focus outreach toward early-career faculty / Associate Professors and new engineering labs requiring hands-on output."
     },
     "pku.edu.cn": {
         "name": "Peking University",
         "chinese_name": "北京大学",
+        "region": "Beijing",
         "tier": FeasibilityTier.TIER_1_DREAM,
         "cs_ranking": 2,
         "is_project_985": True,
         "is_project_211": True,
         "application_fee_rmb": 800,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. Highly competitive cutoffs. Target early-career faculty actively scaling PyTorch/Agentic AI implementations."
+        "feasibility_notes": "Tier 1 Dream. Focus on Key State Labs in AI and software engineering."
     },
     "zju.edu.cn": {
         "name": "Zhejiang University",
         "chinese_name": "浙江大学",
+        "region": "Zhejiang",
         "tier": FeasibilityTier.TIER_1_DREAM,
         "cs_ranking": 3,
         "is_project_985": True,
         "is_project_211": True,
         "application_fee_rmb": 800,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. Focus outreach on College of Computer Science & Technology labs working on vision and applied robotics."
+        "feasibility_notes": "Tier 1 Dream. College of Computer Science & Technology labs working on vision and robotics."
     },
     "sjtu.edu.cn": {
         "name": "Shanghai Jiao Tong University",
         "chinese_name": "上海交通大学",
+        "region": "Shanghai",
         "tier": FeasibilityTier.TIER_1_DREAM,
         "cs_ranking": 4,
         "is_project_985": True,
@@ -60,53 +64,118 @@ KNOWN_UNIVERSITIES_METADATA: Dict[str, Dict] = {
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL],
         "feasibility_notes": "Tier 1 Dream. Direct outreach to AI Institute engineering labs."
     },
+    "fudan.edu.cn": {
+        "name": "Fudan University",
+        "chinese_name": "复旦大学",
+        "region": "Shanghai",
+        "tier": FeasibilityTier.TIER_1_DREAM,
+        "cs_ranking": 5,
+        "is_project_985": True,
+        "is_project_211": True,
+        "application_fee_rmb": 800,
+        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
+        "feasibility_notes": "Tier 1 Dream. School of Computer Science research groups in NLP and systems."
+    },
     "buaa.edu.cn": {
         "name": "Beihang University",
         "chinese_name": "北京航空航天大学",
+        "region": "Beijing",
         "tier": FeasibilityTier.TIER_2_TARGET,
         "cs_ranking": 8,
         "is_project_985": True,
         "is_project_211": True,
         "application_fee_rmb": 400,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Project 985/211 engineering powerhouse. Highly receptive to proven biometric systems and deployed ML pipelines."
+        "feasibility_notes": "Tier 2 Target. Project 985/211 engineering powerhouse. Receptive to biometric systems and applied ML pipelines."
     },
     "hit.edu.cn": {
         "name": "Harbin Institute of Technology",
         "chinese_name": "哈尔滨工业大学",
+        "region": "Heilongjiang",
         "tier": FeasibilityTier.TIER_2_TARGET,
         "cs_ranking": 9,
         "is_project_985": True,
         "is_project_211": True,
         "application_fee_rmb": 400,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Outstanding CS faculty with high quota for research scholars in NLP and system automation."
+        "feasibility_notes": "Tier 2 Target. Outstanding CS faculty with high quota for research scholars in NLP and automation."
     },
     "xidian.edu.cn": {
         "name": "Xidian University",
         "chinese_name": "西安电子科技大学",
+        "region": "Shaanxi",
         "tier": FeasibilityTier.TIER_2_TARGET,
         "cs_ranking": 12,
         "is_project_985": False,
         "is_project_211": True,
         "application_fee_rmb": 0,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.BELT_AND_ROAD],
-        "feasibility_notes": "Tier 2 Target. Project 211 National Key. Zero application fee barrier. Strong alignment with telecommunications and AI."
+        "feasibility_notes": "Tier 2 Target. Project 211 National Key. Zero application fee barrier. Strong alignment with AI & signals."
+    },
+    "xjtu.edu.cn": {
+        "name": "Xi'an Jiaotong University",
+        "chinese_name": "西安交通大学",
+        "region": "Shaanxi",
+        "tier": FeasibilityTier.TIER_2_TARGET,
+        "cs_ranking": 10,
+        "is_project_985": True,
+        "is_project_211": True,
+        "application_fee_rmb": 800,
+        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
+        "feasibility_notes": "Tier 2 Target. C9 League institution with large AI research institute."
+    },
+    "hust.edu.cn": {
+        "name": "Huazhong Univ. of Science and Technology",
+        "chinese_name": "华中科技大学",
+        "region": "Hubei",
+        "tier": FeasibilityTier.TIER_2_TARGET,
+        "cs_ranking": 7,
+        "is_project_985": True,
+        "is_project_211": True,
+        "application_fee_rmb": 600,
+        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
+        "feasibility_notes": "Tier 2 Target. Project 985 top engineering hub in central China."
+    },
+    "uestc.edu.cn": {
+        "name": "Univ. of Electronic Science & Tech of China",
+        "chinese_name": "电子科技大学",
+        "region": "Sichuan",
+        "tier": FeasibilityTier.TIER_2_TARGET,
+        "cs_ranking": 11,
+        "is_project_985": True,
+        "is_project_211": True,
+        "application_fee_rmb": 420,
+        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
+        "feasibility_notes": "Tier 2 Target. Outstanding CS/AI research facilities and high quota for international researchers."
+    },
+    "sysu.edu.cn": {
+        "name": "Sun Yat-sen University",
+        "chinese_name": "中山大学",
+        "region": "Guangdong",
+        "tier": FeasibilityTier.TIER_2_TARGET,
+        "cs_ranking": 13,
+        "is_project_985": True,
+        "is_project_211": True,
+        "application_fee_rmb": 800,
+        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
+        "feasibility_notes": "Tier 2 Target. Top southern comprehensive university with major AI School in Shenzhen campus."
     },
     "bjtu.edu.cn": {
         "name": "Beijing Jiaotong University",
         "chinese_name": "北京交通大学",
+        "region": "Beijing",
         "tier": FeasibilityTier.TIER_2_TARGET,
         "cs_ranking": 15,
         "is_project_985": False,
         "is_project_211": True,
         "application_fee_rmb": 500,
         "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Project 211 engineering hub. Evaluates candidates on technical portfolio rather than rigid CGPA cutoffs."
+        "feasibility_notes": "Tier 2 Target. Project 211 engineering hub. Evaluates candidates on technical portfolio."
     },
     "nuist.edu.cn": {
         "name": "Nanjing Univ. of Information Science & Tech",
         "chinese_name": "南京信息工程大学",
+        "region": "Jiangsu",
         "tier": FeasibilityTier.TIER_3_SAFETY,
         "cs_ranking": 35,
         "is_project_985": False,
@@ -118,6 +187,7 @@ KNOWN_UNIVERSITIES_METADATA: Dict[str, Dict] = {
     "jiangnan.edu.cn": {
         "name": "Jiangnan University",
         "chinese_name": "江南大学",
+        "region": "Jiangsu",
         "tier": FeasibilityTier.TIER_3_SAFETY,
         "cs_ranking": 42,
         "is_project_985": False,
@@ -152,6 +222,7 @@ class DiscoveryEngine:
                 name=matched_meta["name"],
                 chinese_name=matched_meta.get("chinese_name"),
                 domain=domain_clean,
+                region=matched_meta.get("region", "National"),
                 tier=matched_meta["tier"],
                 cs_ranking=matched_meta.get("cs_ranking"),
                 is_project_985=matched_meta.get("is_project_985", False),
@@ -167,6 +238,7 @@ class DiscoveryEngine:
             id=domain_clean.replace(".", "-"),
             name=name or domain_clean.split(".")[0].upper() + " University",
             domain=domain_clean,
+            region="National",
             tier=FeasibilityTier.TIER_3_SAFETY,
             cs_ranking=None,
             is_project_985=False,
@@ -176,6 +248,45 @@ class DiscoveryEngine:
             feasibility_notes="Accredited institution evaluated as Tier 3 Safety. High flexibility on GPA with strong engineering credentials.",
             created_at=datetime.now(timezone.utc)
         )
+
+    def filter_universities(
+        self,
+        regions: Optional[List[str]] = None,
+        tiers: Optional[List[str]] = None,
+        max_rank: Optional[int] = None
+    ) -> List[University]:
+        """Filters Chinese universities dynamically by Region, Tier/Feasibility, and Rank."""
+        results = []
+        for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
+            univ = self.assess_university(domain)
+            if regions and len(regions) > 0 and "All" not in regions:
+                if univ.region not in regions:
+                    continue
+            if tiers and len(tiers) > 0:
+                if univ.tier.value not in tiers and univ.tier not in tiers:
+                    continue
+            if max_rank and univ.cs_ranking and univ.cs_ranking > max_rank:
+                continue
+            results.append(univ)
+        return results
+
+    def discover_department_endpoints(
+        self,
+        university: University,
+        discipline: str = "Computer Science"
+    ) -> List[DepartmentEndpoint]:
+        """Automatically resolves the relevant faculty directory URLs for CS/AI/SE."""
+        d = university.domain
+        return [
+            DepartmentEndpoint(
+                name=f"{university.name} - School of Computer Science",
+                url=f"http://cs.{d}/faculty"
+            ),
+            DepartmentEndpoint(
+                name=f"{university.name} - School of Artificial Intelligence",
+                url=f"http://ai.{d}/supervisors"
+            )
+        ]
 
     def calculate_cost_estimate(self, department_endpoints: List[DepartmentEndpoint]) -> PreRunCostEstimate:
         """

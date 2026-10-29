@@ -21,7 +21,7 @@ The system compensates for strict academic cutoffs (such as a **2.68 CGPA**) by 
 * **Level 1 Cryptographic Lineage:** De-obfuscates anti-spam emails (`[at]`, `(dot)`) and computes SHA-256 content hashes with compound unique deduplication indexes.
 * **Pre-Run Cost Gate:** Halts crawlers and LLM workers until estimated directory pages, faculty counts, and Gemini tokens are explicitly reviewed and approved.
 * **2.68 CGPA Feasibility Compensation:** Categorizes institutions into **Tier 1 (Dream - C9/985)**, **Tier 2 (Target - 211/Key)**, and **Tier 3 (Safety - High Quota/0 Fee)**, targeting younger Associate Professors and active research labs.
-* **Gemini 1.5 Synthesis Agent:** Generates factual 2–3 sentence research digests and drafts concise (<200 words) personalized emails assuring complete financial independence (zero lab stipend required), locked to `PENDING_REVIEW`.
+* **Gemini LLM Synthesis Agent:** Generates factual 2-3 sentence research digests and drafts concise (<200 words) personalized emails highlighting applied engineering capabilities (PyTorch, Agentic AI, biometrics) and expressing intention to apply for CSC Type B / University Presidential scholarships under their supervision, locked to `PENDING_REVIEW`.
 * **Triple-Gate Outbound Safety Engine:**
   1. **Gate 1 (Master Kill-Switch):** `SYSTEM_GATE_ACTIVE=True` blocks 100% of outbound SMTP sockets with `403 Forbidden`.
   2. **Gate 2 (Sandbox Test Mode):** Overrides recipients to `TEST_RECIPIENT_EMAIL` with diagnostic headers.

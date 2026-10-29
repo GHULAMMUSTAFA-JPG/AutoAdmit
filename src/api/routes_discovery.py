@@ -28,6 +28,26 @@ class IntakeRequest(BaseModel):
     primary_skills: List[str] = ["Python", "PyTorch", "Agentic AI", "Computer Vision"]
 
 
+class FilterUniversitiesRequest(BaseModel):
+    regions: Optional[List[str]] = None
+    tiers: Optional[List[str]] = None
+    max_rank: Optional[int] = None
+    discipline: str = "Computer Science"
+
+
+@router.post("/filter", response_model=List[University])
+def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str = Depends(get_current_user)):
+    """Filters Chinese universities dynamically by Region, Tier/Rank, and attaches CS/AI department endpoints."""
+    matched = discovery_engine.filter_universities(
+        regions=request.regions,
+        tiers=request.tiers,
+        max_rank=request.max_rank
+    )
+    for u in matched:
+        u.department_endpoints = discovery_engine.discover_department_endpoints(u, request.discipline)
+    return matched
+
+
 @router.get("/universities", response_model=List[University])
 def get_universities_directory(user: str = Depends(get_current_user)):
     """Returns directory of known universities with scholarship metadata and feasibility tiers."""
