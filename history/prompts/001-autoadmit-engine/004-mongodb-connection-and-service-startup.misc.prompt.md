@@ -53,3 +53,4 @@ Identified that MongoDB 8.2 is installed at `C:\Program Files\MongoDB\Server\8.2
 - Graders run and results (PASS/FAIL): PASS
 - Prompt variant (if applicable): default
 - Next experiment (smallest change to try): Start MongoDB and refresh UI.
+
