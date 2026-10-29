@@ -29,9 +29,140 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* App Layout: Left Sidebar + Right Main Content */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Left Sidebar Panel */
+.sidebar-panel {
+  width: 270px;
+  min-width: 270px;
+  background-color: #0b1120;
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  z-index: 50;
+  flex-shrink: 0;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: #080d1a;
+}
+
+.brand-titles {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.sidebar-brand .brand-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+
+.sidebar-brand .brand-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.sidebar-brand .brand-icon {
+  font-size: 1.6rem;
+}
+
+/* Vertical Navigation Menu */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 0.75rem;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.nav-item.active {
+  background: var(--bg-secondary);
+  color: var(--accent-blue);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent-blue);
+}
+
+.nav-icon {
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+}
+
+.nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 1rem;
+  border-top: 1px solid var(--border-color);
+  background-color: #080d1a;
+}
+
+.btn-lock {
+  font-size: 0.82rem;
+  padding: 0.45rem;
+}
+
+/* Right Content Wrapper */
+.content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--bg-primary);
+  height: 100vh;
+  overflow-y: auto;
 }
 
 /* Top Navigation Bar */
@@ -39,28 +170,21 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1.5rem;
+  padding: 0.85rem 1.75rem;
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 40;
+  flex-shrink: 0;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.brand-icon {
-  font-size: 1.5rem;
-}
-
-.brand-name {
-  font-size: 1.25rem;
+.page-title {
+  font-size: 1.1rem;
   font-weight: 700;
-  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.3px;
 }
 
 .safety-bar {
@@ -478,6 +602,77 @@ textarea {
 .mt-3 { margin-top: 1rem; }
 .mt-4 { margin-top: 1.5rem; }
 .ml-2 { margin-left: 0.5rem; }
+
+/* Auth Screen / Login Overlay */
+.auth-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.auth-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.auth-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.auth-icon {
+  font-size: 2.5rem;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.auth-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.auth-header .subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+}
+
+.btn-block {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-top: 0.75rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.auth-error-msg {
+  color: var(--accent-red);
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  display: block;
+}
 
 @media (max-width: 900px) {
   .grid-2, .split-pane {

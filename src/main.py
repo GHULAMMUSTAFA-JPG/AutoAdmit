@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +12,7 @@ from src.api.routes_professors import router as professors_router
 from src.api.routes_drafts import router as drafts_router
 from src.api.routes_dispatch import router as dispatch_router
 from src.api.routes_tracking import router as tracking_router
-from src.api.routes_system import router as system_router
+from src.api.routes_system import router as system_router, websocket_log_stream
 from src.config import settings
 from src.core.database import db_manager
 from src.core.logger import setup_logger
@@ -65,6 +65,12 @@ app.include_router(drafts_router)
 app.include_router(dispatch_router)
 app.include_router(tracking_router)
 app.include_router(system_router)
+
+
+@app.websocket("/ws/logs")
+async def root_websocket_endpoint(websocket: WebSocket):
+    """Direct root WebSocket log streaming endpoint for live UI streaming."""
+    await websocket_log_stream(websocket)
 
 # Mount static asset directory
 static_dir = Path(__file__).parent / "static"

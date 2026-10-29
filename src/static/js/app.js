@@ -5,28 +5,134 @@ let currentDrafts = [];
 let selectedDraft = null;
 let currentFilter = "ALL";
 
-// Basic Auth credentials (default admin)
-const authHeader = "Basic " + btoa("admin:autoadmit_secure_pass_2026");
+// Retrieve saved authentication header from localStorage or prompt
+let authHeader = localStorage.getItem("autoadmit_auth") || "";
 
 function fetchWithAuth(url, options = {}) {
   options.headers = options.headers || {};
-  options.headers["Authorization"] = authHeader;
+  if (authHeader) {
+    options.headers["Authorization"] = authHeader;
+  }
   if (!options.headers["Content-Type"] && options.method && options.method !== "GET") {
     options.headers["Content-Type"] = "application/json";
   }
-  return fetch(url, options);
+  return fetch(url, options).then(res => {
+    if (res.status === 401 && !url.includes("/login")) {
+      showAuthOverlay("Session expired or unauthorized. Please enter system password.");
+    }
+    return res;
+  });
 }
 
+function showAuthOverlay(msg = "") {
+  const overlay = document.getElementById("auth-overlay");
+  const errEl = document.getElementById("auth-error");
+  if (overlay) {
+    overlay.classList.remove("hidden");
+    if (msg && errEl) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    } else if (errEl) {
+      errEl.classList.add("hidden");
+    }
+    const pwdInput = document.getElementById("auth-password");
+    if (pwdInput) {
+      pwdInput.value = "";
+      pwdInput.focus();
+    }
+  }
+}
+
+function hideAuthOverlay() {
+  const overlay = document.getElementById("auth-overlay");
+  if (overlay) {
+    overlay.classList.add("hidden");
+  }
+}
+
+async function submitPasswordLogin() {
+  const pwdInput = document.getElementById("auth-password");
+  const errEl = document.getElementById("auth-error");
+  const password = pwdInput ? pwdInput.value.trim() : "";
+
+  if (!password) {
+    if (errEl) {
+      errEl.textContent = "Please enter password.";
+      errEl.classList.remove("hidden");
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/v1/system/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: password })
+    });
+
+    if (res.ok) {
+      authHeader = "Basic " + btoa("admin:" + password);
+      localStorage.setItem("autoadmit_auth", authHeader);
+      hideAuthOverlay();
+      syncCSTClock();
+      loadUniversities();
+    } else {
+      if (errEl) {
+        errEl.textContent = "Invalid password. Access denied.";
+        errEl.classList.remove("hidden");
+      }
+    }
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = "Connection error: " + err;
+      errEl.classList.remove("hidden");
+    }
+  }
+}
+
+function lockSession() {
+  authHeader = "";
+  localStorage.removeItem("autoadmit_auth");
+  showAuthOverlay();
+}
+
+// Tab Titles Mapping
+const tabTitles = {
+  "tab-setup": "1. Campaign Setup & Resource Estimation",
+  "tab-universities": "2. University Feasibility & Scholarship Directory",
+  "tab-faculty": "3. Verified Faculty Supervisors Roster",
+  "tab-review": "4. Email Review Workspace & Approval Staging",
+  "tab-dispatch": "5. Outbox Dispatcher & Delivery Scheduler",
+  "tab-analytics": "6. Campaign Analytics & Inbound Reply Tracker",
+  "tab-terminal": "7. System Terminal & Live Log Streaming"
+};
+
 // Tab Switching
-function switchTab(tabId) {
+function switchTab(tabId, clickedBtn = null) {
   document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
   document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
-  
+
   const target = document.getElementById(tabId);
   if (target) target.classList.add("active");
-  
-  // Highlight tab button
-  event.target.classList.add("active");
+
+  const titleEl = document.getElementById("current-view-title");
+  if (titleEl && tabTitles[tabId]) {
+    titleEl.textContent = tabTitles[tabId];
+  }
+
+  // Highlight active button
+  const btn = clickedBtn || (typeof event !== "undefined" && event ? event.target.closest(".nav-item, .tab-btn") : null);
+  if (btn) {
+    btn.classList.add("active");
+  } else {
+    document.querySelectorAll(".nav-item").forEach(item => {
+      const oc = item.getAttribute("onclick");
+      if (oc && oc.includes(tabId)) {
+        item.classList.add("active");
+      }
+    });
+  }
 
   // Load relevant data on tab open
   if (tabId === "tab-universities") loadUniversities();
@@ -451,7 +557,9 @@ function initWebSocket() {
   };
 
   socket.onclose = function () {
-    setTimeout(initWebSocket, 3000);
+    if (authHeader) {
+      setTimeout(initWebSocket, 4000);
+    }
   };
 }
 
@@ -483,8 +591,20 @@ function filterLogs() {
 }
 
 // Initial Bootstrapping
-window.addEventListener("DOMContentLoaded", () => {
-  syncCSTClock();
+window.addEventListener("DOMContentLoaded", async () => {
+  if (authHeader) {
+    try {
+      const res = await fetchWithAuth("/api/v1/system/health");
+      if (res.ok) {
+        hideAuthOverlay();
+        syncCSTClock();
+        setInterval(syncCSTClock, 10000);
+        initWebSocket();
+        return;
+      }
+    } catch (e) {}
+  }
+  showAuthOverlay();
   setInterval(syncCSTClock, 10000);
   initWebSocket();
 });

@@ -9,55 +9,114 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body class="dark-theme">
-  <!-- Top Navigation & Safety Bar -->
-  <header class="top-nav">
-    <div class="brand">
-      <span class="brand-icon">⚡</span>
-      <span class="brand-name">AutoAdmit Engine</span>
-      <span class="badge version">v1.0.0</span>
+  <!-- Auth / Login Modal Overlay -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-header">
+        <span class="auth-icon">⚡</span>
+        <h2>AutoAdmit Engine</h2>
+        <p class="subtitle">Protected System Gate: Enter your password to access</p>
+      </div>
+      <form id="auth-form" onsubmit="event.preventDefault(); submitPasswordLogin();">
+        <div class="form-group">
+          <label for="auth-password">System Password:</label>
+          <input type="password" id="auth-password" class="form-control" placeholder="Enter password (e.g. autoadmit_secure_pass_2026)" required autofocus />
+          <span id="auth-error" class="auth-error-msg hidden">Invalid password. Access denied.</span>
+        </div>
+        <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">Unlock Dashboard ➔</button>
+      </form>
     </div>
+  </div>
 
-    <div class="safety-bar">
-      <!-- Master Kill-Switch -->
-      <div class="safety-toggle-group">
-        <span class="safety-label">Master Kill-Switch:</span>
-        <button id="btn-master-gate" class="btn-toggle gate-active" onclick="toggleMasterGate()">ACTIVE (SAFE)</button>
+  <!-- App Layout with Vertical Left Panel -->
+  <div class="app-layout">
+    <!-- Left Sidebar Panel -->
+    <aside class="sidebar-panel">
+      <div class="sidebar-brand">
+        <span class="brand-icon">⚡</span>
+        <div class="brand-titles">
+          <span class="brand-name">AutoAdmit</span>
+          <span class="brand-sub">Engine Platform</span>
+        </div>
+        <span class="badge version">v1.0</span>
       </div>
 
-      <!-- Sandbox Mode -->
-      <div class="safety-toggle-group">
-        <span class="safety-label">Sandbox Mode:</span>
-        <button id="btn-sandbox-mode" class="btn-toggle sandbox-on" onclick="toggleSandboxMode()">ON</button>
+      <!-- Vertical Navigation Menu -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" onclick="switchTab('tab-setup', this)">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">1. Setup & Cost</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-universities', this)">
+          <span class="nav-icon">🏛️</span>
+          <span class="nav-label">2. Universities</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-faculty', this)">
+          <span class="nav-icon">👨‍🏫</span>
+          <span class="nav-label">3. Faculty Roster</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-review', this)">
+          <span class="nav-icon">✉️</span>
+          <span class="nav-label">4. Review Workspace</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-dispatch', this)">
+          <span class="nav-icon">🚀</span>
+          <span class="nav-label">5. Outbox Dispatch</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-analytics', this)">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">6. Analytics & Replies</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('tab-terminal', this)">
+          <span class="nav-icon">💻</span>
+          <span class="nav-label">7. Terminal & Logs</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <div class="mount-status">
+          <span class="dot active"></span>
+          <span id="storage-indicator">Volume: Persistent</span>
+        </div>
+        <button class="btn btn-secondary btn-block btn-lock mt-2" onclick="lockSession()" title="Lock Session">
+          🔒 Lock Session
+        </button>
       </div>
+    </aside>
 
-      <!-- CST Clock -->
-      <div class="cst-clock-container">
-        <span class="clock-icon">🕒</span>
-        <span id="cst-clock">--:--:-- CST</span>
-        <span id="cst-window-badge" class="badge window-closed">CST Window: Checked</span>
-      </div>
+    <!-- Right Side Content Area -->
+    <div class="content-wrapper">
+      <!-- Top Navigation & Safety Bar -->
+      <header class="top-nav">
+        <div class="header-left">
+          <h1 id="current-view-title" class="page-title">1. Campaign Setup & Resource Estimation</h1>
+        </div>
 
-      <!-- Volume Mount Indicator -->
-      <div class="mount-status">
-        <span class="dot active"></span>
-        <span id="storage-indicator">Volume: Persistent</span>
-      </div>
-    </div>
-  </header>
+        <div class="safety-bar">
+          <!-- Master Kill-Switch -->
+          <div class="safety-toggle-group">
+            <span class="safety-label">Master Kill-Switch:</span>
+            <button id="btn-master-gate" class="btn-toggle gate-active" onclick="toggleMasterGate()">ACTIVE (SAFE)</button>
+          </div>
 
-  <!-- Main Application Tabs Navigation -->
-  <nav class="tabs-nav">
-    <button class="tab-btn active" onclick="switchTab('tab-setup')">1. Campaign Setup & Cost</button>
-    <button class="tab-btn" onclick="switchTab('tab-universities')">2. University Feasibility</button>
-    <button class="tab-btn" onclick="switchTab('tab-faculty')">3. Faculty Roster</button>
-    <button class="tab-btn" onclick="switchTab('tab-review')">4. Email Review Workspace</button>
-    <button class="tab-btn" onclick="switchTab('tab-dispatch')">5. Outbox & Scheduler</button>
-    <button class="tab-btn" onclick="switchTab('tab-analytics')">6. Analytics & Replies</button>
-    <button class="tab-btn" onclick="switchTab('tab-terminal')">7. Terminal & Logs</button>
-  </nav>
+          <!-- Sandbox Mode -->
+          <div class="safety-toggle-group">
+            <span class="safety-label">Sandbox Mode:</span>
+            <button id="btn-sandbox-mode" class="btn-toggle sandbox-on" onclick="toggleSandboxMode()">ON</button>
+          </div>
 
-  <!-- Main Content Area -->
-  <main class="main-container">
+          <!-- CST Clock -->
+          <div class="cst-clock-container">
+            <span class="clock-icon">🕒</span>
+            <span id="cst-clock">--:--:-- CST</span>
+            <span id="cst-window-badge" class="badge window-closed">CST Window: Checked</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content Area -->
+      <main class="main-container">
 
     <!-- Tab 1: Campaign Setup & Resource Estimation -->
     <section id="tab-setup" class="tab-content active">
@@ -373,7 +432,9 @@
       </div>
     </section>
 
-  </main>
+      </main>
+    </div> <!-- .content-wrapper -->
+  </div> <!-- .app-layout -->
 
   <script src="/static/js/app.js"></script>
 </body>
