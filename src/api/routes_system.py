@@ -1,5 +1,6 @@
 """System health, safety gate toggles, and real-time WebSocket log streaming."""
 
+import asyncio
 import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from src.api.deps import get_current_user
 from src.config import settings
 from src.core.database import db_manager
-from src.core.logger import active_log_websockets, setup_logger
+from src.core.logger import active_log_websockets, setup_logger, WebSocketLogHandler
 
 router = APIRouter(prefix="/api/v1/system", tags=["System"])
 logger = setup_logger("SystemAPI")
@@ -97,6 +98,7 @@ async def websocket_log_stream(websocket: WebSocket):
     """
     await websocket.accept()
     active_log_websockets.add(websocket)
+    WebSocketLogHandler.set_loop(asyncio.get_running_loop())
     logger.info("New WebSocket log subscriber connected.")
 
     try:
@@ -106,8 +108,9 @@ async def websocket_log_stream(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
-        active_log_websockets.discard(websocket)
         logger.info("WebSocket log subscriber disconnected.")
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"WebSocket client terminated: {exc}")
+    finally:
         active_log_websockets.discard(websocket)
 

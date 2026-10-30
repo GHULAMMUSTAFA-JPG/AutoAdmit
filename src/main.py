@@ -1,5 +1,6 @@
 """FastAPI Application entrypoint for AutoAdmit Engine."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, WebSocket
@@ -12,10 +13,11 @@ from src.api.routes_professors import router as professors_router
 from src.api.routes_drafts import router as drafts_router
 from src.api.routes_dispatch import router as dispatch_router
 from src.api.routes_tracking import router as tracking_router
+from src.api.routes_prompts import router as prompts_router
 from src.api.routes_system import router as system_router, websocket_log_stream
 from src.config import settings
 from src.core.database import db_manager
-from src.core.logger import setup_logger
+from src.core.logger import setup_logger, WebSocketLogHandler
 from src.services.change_stream import change_stream_reactor
 
 logger = setup_logger("AutoAdmitGateway")
@@ -25,6 +27,7 @@ logger = setup_logger("AutoAdmitGateway")
 async def lifespan(app: FastAPI):
     """Lifecycle event handler for database initialization and change stream reactor."""
     logger.info("Initializing AutoAdmit Engine subsystems...")
+    WebSocketLogHandler.set_loop(asyncio.get_running_loop())
     settings.ensure_storage_paths()
 
     # Attempt MongoDB connection
@@ -64,6 +67,7 @@ app.include_router(professors_router)
 app.include_router(drafts_router)
 app.include_router(dispatch_router)
 app.include_router(tracking_router)
+app.include_router(prompts_router)
 app.include_router(system_router)
 
 

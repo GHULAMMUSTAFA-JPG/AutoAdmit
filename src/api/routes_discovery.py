@@ -11,7 +11,6 @@ from src.models.university import (
     University,
 )
 from src.services.discovery import (
-    KNOWN_UNIVERSITIES_METADATA,
     discovery_engine,
 )
 
@@ -37,7 +36,7 @@ class FilterUniversitiesRequest(BaseModel):
 
 
 @router.post("/filter", response_model=List[University])
-def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str = Depends(get_current_user)):
+async def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str = Depends(get_current_user)):
     """Filters Chinese universities dynamically by Region, Tier/Rank, and attaches CS/AI department endpoints."""
     matched = discovery_engine.filter_universities(
         regions=request.regions,
@@ -47,6 +46,15 @@ def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str =
     )
     for u in matched:
         u.department_endpoints = discovery_engine.discover_department_endpoints(u, request.discipline)
+        if db_manager.is_connected and db_manager.db is not None:
+            try:
+                await db_manager.get_collection("universities").update_one(
+                    {"domain": u.domain},
+                    {"$set": u.model_dump()},
+                    upsert=True
+                )
+            except Exception:
+                pass
     return matched
 
 
@@ -55,23 +63,28 @@ from src.core.database import db_manager
 
 @router.get("/universities", response_model=List[University])
 async def get_universities_directory(user: str = Depends(get_current_user)):
-    """Returns directory of known universities from MongoDB database."""
+    """Returns directory of known universities strictly from MongoDB database without auto-seeding."""
     if db_manager.is_connected and db_manager.db is not None:
         cursor = db_manager.get_collection("universities").find({})
         results = []
         async for doc in cursor:
             doc.pop("_id", None)
             results.append(University(**doc))
-        if results:
-            return results
+        return results
 
-        # If collection is currently empty, initialize MongoDB with accredited catalog records
-        catalog_results = []
-        for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
-            univ = discovery_engine.assess_university(domain)
-            univ.is_seed = True
-            univ.data_source = "benchmark_seed"
-            catalog_results.append(univ)
+    # Offline/disconnected fallback returns empty list
+    return []
+
+
+@router.post("/feasibility", response_model=List[University])
+async def evaluate_feasibility(request: IntakeRequest, user: str = Depends(get_current_user)):
+    """Evaluates institutional competitiveness against profile realities (2.68 CGPA compensation)."""
+    results = []
+    for url in request.urls:
+        univ = discovery_engine.assess_university(url)
+        results.append(univ)
+        discovered_universities_cache[univ.id] = univ
+        if db_manager.is_connected and db_manager.db is not None:
             try:
                 await db_manager.get_collection("universities").update_one(
                     {"domain": univ.domain},
@@ -80,24 +93,6 @@ async def get_universities_directory(user: str = Depends(get_current_user)):
                 )
             except Exception:
                 pass
-        return catalog_results
-
-    # Offline fallback
-    results = []
-    for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
-        univ = discovery_engine.assess_university(domain)
-        results.append(univ)
-    return results
-
-
-@router.post("/feasibility", response_model=List[University])
-def evaluate_feasibility(request: IntakeRequest, user: str = Depends(get_current_user)):
-    """Evaluates institutional competitiveness against profile realities (2.68 CGPA compensation)."""
-    results = []
-    for url in request.urls:
-        univ = discovery_engine.assess_university(url)
-        results.append(univ)
-        discovered_universities_cache[univ.id] = univ
     return results
 
 

@@ -23,19 +23,45 @@ class DatabaseManager:
 
     async def connect(self, server_selection_timeout_ms: int = 2000) -> None:
         """Establishes connection to MongoDB and creates unique compound indexes."""
+        import socket
+        from urllib.parse import urlparse
+
+        # Quick pre-flight check to see if host/port is reachable without stalling Motor worker threads
+        parsed = urlparse(self.uri)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 27017
+        try:
+            sock = socket.create_connection((host, port), timeout=0.3)
+            sock.close()
+        except Exception as probe_err:
+            self.is_connected = False
+            self.client = None
+            self.db = None
+            logger.info(f"MongoDB offline/unreachable at {host}:{port} ({probe_err}). Operating in offline/mock mode.")
+            return
+
         try:
             self.client = AsyncIOMotorClient(
                 self.uri,
-                serverSelectionTimeoutMS=server_selection_timeout_ms
+                serverSelectionTimeoutMS=server_selection_timeout_ms,
+                connectTimeoutMS=server_selection_timeout_ms,
+                socketTimeoutMS=server_selection_timeout_ms
             )
             self.db = self.client[self.db_name]
-            # Ping database to verify connection
-            await self.client.admin.command("ping")
+            # Ping database to verify connection with strict timeout
+            await asyncio.wait_for(
+                self.client.admin.command("ping"),
+                timeout=server_selection_timeout_ms / 1000.0
+            )
             self.is_connected = True
             logger.info(f"Connected to MongoDB at {self.uri} (Database: {self.db_name})")
             await self.create_indexes()
-        except (ConnectionFailure, Exception) as exc:
+        except (ConnectionFailure, asyncio.TimeoutError, Exception) as exc:
+            if self.client:
+                self.client.close()
             self.is_connected = False
+            self.client = None
+            self.db = None
             logger.warning(f"MongoDB connection failed: {exc}. Operating in offline/mock mode.")
 
     async def create_indexes(self) -> None:
@@ -91,12 +117,14 @@ class DatabaseManager:
         """Gracefully close database client."""
         if self.client:
             self.client.close()
+            self.client = None
+            self.db = None
             self.is_connected = False
             logger.info("MongoDB connection closed.")
 
     def get_collection(self, collection_name: str) -> Any:
         """Returns collection handle or raises if not initialized."""
-        if self.db is None:
+        if self.db is None or not self.is_connected:
             raise RuntimeError("Database is not connected.")
         return self.db[collection_name]
 

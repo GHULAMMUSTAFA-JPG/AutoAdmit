@@ -3,170 +3,183 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoAdmit Engine — Strategic Discovery & Outreach</title>
+  <title>AutoAdmit Enterprise Engine — Academic Admission & Outreach Platform</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
-<body class="light-theme">
+<body class="enterprise-body">
   <!-- Auth / Login Modal Overlay -->
   <div id="auth-overlay" class="auth-overlay">
     <div class="auth-card">
-      <div class="auth-icon">🔒</div>
+      <div class="auth-icon">🛡️</div>
       <div class="auth-header">
-        <h2>AutoAdmit Engine</h2>
-        <p class="subtitle">Protected System Gate: Enter your password to access</p>
+        <h2>AutoAdmit Enterprise</h2>
+        <p class="subtitle">Secure Academic Discovery & Outreach Gateway</p>
       </div>
       <form id="auth-form" onsubmit="event.preventDefault(); submitPasswordLogin();">
         <div class="form-group" style="text-align: left;">
-          <label for="auth-password">System Password:</label>
-          <input type="password" id="auth-password" class="form-control" placeholder="Enter password (e.g. autoadmit_secure_pass_2026)" required autofocus />
+          <label for="auth-password">System Gateway Password:</label>
+          <input type="password" id="auth-password" class="form-control" placeholder="Enter password (e.g. 2026)" required autofocus />
           <span id="auth-error" class="auth-error-msg hidden">Invalid password. Access denied.</span>
         </div>
-        <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">Unlock Dashboard ➔</button>
+        <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">Authenticate Session ➔</button>
       </form>
     </div>
   </div>
 
-  <!-- App Layout: Sticky Left Navigation Dock + Single Big Page Content -->
-  <div class="app-layout">
-    <!-- Left Sidebar Navigation Dock -->
-    <aside class="sidebar-panel">
-      <div class="sidebar-brand">
-        <span class="brand-icon">⚡</span>
-        <div class="brand-titles">
-          <span class="brand-name">AutoAdmit</span>
-          <span class="brand-sub">Engine Platform</span>
-        </div>
-        <span class="badge version">v1.0</span>
-      </div>
-
-      <!-- Vertical Section Jump Menu -->
-      <nav class="sidebar-nav">
-        <div class="nav-header-label">Workflow Sections</div>
-        <button class="nav-item active" onclick="switchTab('tab-setup', this)">
-          <span class="nav-icon">⚙️</span>
-          <span class="nav-label">1. Setup & Cost Gate</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-universities', this)">
-          <span class="nav-icon">🏛️</span>
-          <span class="nav-label">2. Universities Directory</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-faculty', this)">
-          <span class="nav-icon">👨‍🏫</span>
-          <span class="nav-label">3. Faculty Roster</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-review', this)">
-          <span class="nav-icon">✉️</span>
-          <span class="nav-label">4. Review Workspace</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-dispatch', this)">
-          <span class="nav-icon">🚀</span>
-          <span class="nav-label">5. Outbox Dispatch</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-analytics', this)">
-          <span class="nav-icon">📊</span>
-          <span class="nav-label">6. Analytics & Replies</span>
-        </button>
-        <button class="nav-item" onclick="switchTab('tab-terminal', this)">
-          <span class="nav-icon">💻</span>
-          <span class="nav-label">7. Live Terminal</span>
-        </button>
-      </nav>
-
-      <!-- Sidebar Footer -->
-      <div class="sidebar-footer">
-        <div class="mount-status">
-          <span class="dot active"></span>
-          <span id="storage-indicator">Volume: Persistent (DB)</span>
-        </div>
-        <button class="btn btn-secondary btn-block btn-lock mt-2" onclick="lockSession()" title="Lock Session">
-          🔒 Lock Session
-        </button>
-      </div>
-    </aside>
-
-    <!-- Right Side: Continuous One Big Page Canvas -->
-    <div class="content-wrapper" id="content-scroll-container">
-      <!-- Sticky Top Navigation & Safety Bar -->
-      <header class="top-nav">
-        <div class="header-left">
-          <h1 id="current-view-title" class="page-title">AutoAdmit Engine Dashboard</h1>
-          <div class="page-subtitle-crumb">Live Admission Discovery, Verification & Outreach Operations</div>
+  <!-- Enterprise Application Layout -->
+  <div class="enterprise-layout">
+    <!-- Top Enterprise Header -->
+    <header class="enterprise-header">
+      <div class="header-primary-row">
+        <div class="brand-group">
+          <div class="brand-badge">AutoAdmit</div>
+          <div class="brand-info">
+            <span class="brand-title">Enterprise Admission Engine</span>
+            <span class="brand-subtitle">Automated Chinese University Discovery & Supervisor Verification</span>
+          </div>
+          <span class="system-env-pill">Production Gateway</span>
         </div>
 
-        <div class="safety-bar">
-          <!-- Master Kill-Switch -->
-          <div class="safety-toggle-group">
-            <span class="safety-label">Master Kill-Switch:</span>
+        <!-- System Controls & Safety Status -->
+        <div class="header-controls-group">
+          <div class="control-box">
+            <span class="control-label">Master Kill-Switch</span>
             <button id="btn-master-gate" class="btn-toggle gate-active" onclick="toggleMasterGate()">ACTIVE (SAFE)</button>
           </div>
 
-          <!-- Sandbox Mode -->
-          <div class="safety-toggle-group">
-            <span class="safety-label">Sandbox Mode:</span>
+          <div class="control-box">
+            <span class="control-label">Sandbox Mode</span>
             <button id="btn-sandbox-mode" class="btn-toggle sandbox-on" onclick="toggleSandboxMode()">ON</button>
           </div>
 
-          <!-- CST Clock -->
-          <div class="cst-clock-container">
-            <span class="clock-icon">🕒</span>
-            <span id="cst-clock">--:--:-- CST</span>
-            <span id="cst-window-badge" class="badge window-closed">CST Window: Checked</span>
+          <div class="control-box cst-box">
+            <span class="control-label">CST Time (UTC+8)</span>
+            <div class="cst-display">
+              <span id="cst-clock" class="mono-clock">--:--:-- CST</span>
+              <span id="cst-window-badge" class="badge window-closed">Checked</span>
+            </div>
+          </div>
+
+          <div class="control-box db-box">
+            <span class="control-label">Storage Lineage</span>
+            <div class="db-status">
+              <span class="status-dot-pulse"></span>
+              <span id="storage-indicator">MongoDB: autoadmit</span>
+            </div>
+          </div>
+
+          <button class="btn btn-secondary btn-sm btn-lock" onclick="lockSession()" title="Lock Session">
+            🔒 Lock
+          </button>
+        </div>
+      </div>
+
+      <!-- Top Enterprise Sticky Navigation Bar -->
+      <nav class="enterprise-nav-bar" id="enterprise-nav">
+        <div class="nav-links-track">
+          <a href="#tab-setup" class="nav-tab active" onclick="smoothJump(event, 'tab-setup')">
+            <span class="step-num">01</span> Discovery & Cost Gate
+          </a>
+          <a href="#tab-universities" class="nav-tab" onclick="smoothJump(event, 'tab-universities')">
+            <span class="step-num">02</span> Universities Directory
+          </a>
+          <a href="#tab-faculty" class="nav-tab" onclick="smoothJump(event, 'tab-faculty')">
+            <span class="step-num">03</span> Faculty Supervisors Roster
+          </a>
+          <a href="#tab-prompts" class="nav-tab" onclick="smoothJump(event, 'tab-prompts')">
+            <span class="step-num">04</span> Prompts & Directives
+          </a>
+          <a href="#tab-review" class="nav-tab" onclick="smoothJump(event, 'tab-review')">
+            <span class="step-num">05</span> Email Review Workspace
+          </a>
+          <a href="#tab-dispatch" class="nav-tab" onclick="smoothJump(event, 'tab-dispatch')">
+            <span class="step-num">06</span> Outbox Dispatcher
+          </a>
+          <a href="#tab-analytics" class="nav-tab" onclick="smoothJump(event, 'tab-analytics')">
+            <span class="step-num">07</span> Analytics & Telemetry
+          </a>
+          <a href="#tab-terminal" class="nav-tab" onclick="smoothJump(event, 'tab-terminal')">
+            <span class="step-num">08</span> Live System Console
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <!-- Main Content Canvas -->
+    <main class="enterprise-main">
+
+      <!-- Section 1: Campaign Setup & Resource Estimation (Redesigned Enterprise Layout) -->
+      <section id="tab-setup" class="enterprise-card page-section">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">01</span>
+            <span class="indicator-title">DISCOVERY & PRE-RUN COST GATE</span>
+          </div>
+          <div class="card-actions">
+            <span class="status-note">Phase 1: Multi-Source Internet Extraction</span>
           </div>
         </div>
-      </header>
-
-      <!-- Main Container: All 7 Sections on One Big Page -->
-      <main class="main-container">
-
-        <!-- Section 1: Campaign Setup & Resource Estimation -->
-        <section id="tab-setup" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">01 / DISCOVERY & COST GATE</span>
-          </div>
-          <h2>Discovery Configuration & Pre-Run Cost Gate</h2>
-          <p class="subtitle">Discover Chinese universities by Region & Rank, resolve official department portals, and launch parallel workers to harvest Master's supervisors (硕导).</p>
-
-          <!-- Discovery Mode Selector -->
-          <div class="tabs-subnav mb-3">
-            <button id="btn-mode-auto" class="btn btn-primary mr-2" onclick="switchDiscoveryMode('auto')">🌐 Automated Regional Discovery</button>
-            <button id="btn-mode-manual" class="btn btn-secondary" onclick="switchDiscoveryMode('manual')">📋 Direct URL Intake</button>
+        
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>University Discovery & Feasibility Intake</h2>
+            <p class="subtitle">Query live accredited Chinese universities by Region & Rank, cross-check institutional validity, resolve official department portals, and calculate pre-run costs before launching parallel supervisor harvesters.</p>
           </div>
 
-          <!-- Mode A: Automated Discovery by Region & Rank -->
-          <div id="mode-auto-container" class="discovery-mode-box">
-            <div class="grid-2">
+          <!-- Discovery Source Selector (ADR-0001 Multi-Source Architecture) -->
+          <div class="source-selector-bar">
+            <span class="source-label">Discovery Source:</span>
+            <div class="source-pills">
+              <button id="src-combined" class="source-pill active" onclick="setDiscoverySource('combined')">
+                <span class="pill-icon">⭐</span> Combined Triple-Check <span class="pill-tag">Recommended</span>
+              </button>
+              <button id="src-wikidata" class="source-pill" onclick="setDiscoverySource('wikidata')">
+                <span class="pill-icon">🌐</span> Wikidata SPARQL <span class="pill-tag">Fast Batch</span>
+              </button>
+              <button id="src-moe" class="source-pill" onclick="setDiscoverySource('moe')">
+                <span class="pill-icon">🏛️</span> China MOE Official List <span class="pill-tag">Gov Registry</span>
+              </button>
+              <button id="src-manual" class="source-pill" onclick="setDiscoverySource('manual')">
+                <span class="pill-icon">📋</span> Direct URL Intake <span class="pill-tag">.edu.cn</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Filter Configuration Grid -->
+          <div id="mode-auto-container" class="filter-panel mt-3">
+            <div class="form-grid-3">
               <div class="form-group">
                 <label for="filter-regions">Target Regions (Provinces / Municipalities):</label>
-                <select id="filter-regions" class="form-control" multiple size="8">
-                  <option value="All" selected>All Major Regions (National Catalog)</option>
-                  <option value="Beijing">Beijing (Peking, Tsinghua, Beihang, BUPT, BIT, RUC, UCAS)</option>
-                  <option value="Shanghai">Shanghai (SJTU, Fudan, Tongji, ECNU, ShanghaiTech, SHU)</option>
-                  <option value="Jiangsu">Jiangsu (Nanjing Univ, Southeast, NUAA, NUST, NUIST, Jiangnan)</option>
-                  <option value="Zhejiang">Zhejiang (ZJU, Hangzhou Dianzi, Ningbo)</option>
-                  <option value="Guangdong">Guangdong (Sun Yat-sen, SCUT, Shenzhen Univ, SUSTech, GDUT)</option>
-                  <option value="Shaanxi">Shaanxi (Xi'an Jiaotong, Xidian, NWPU, Northwest Univ, Chang'an)</option>
-                  <option value="Hubei">Hubei (HUST, Wuhan Univ, Wuhan Tech, CUG)</option>
-                  <option value="Sichuan">Sichuan (UESTC, Sichuan Univ, Southwest Jiaotong)</option>
-                  <option value="Chongqing">Chongqing (Chongqing Univ, CQUPT)</option>
-                  <option value="Heilongjiang">Heilongjiang (Harbin Inst of Tech, Harbin Engineering)</option>
-                  <option value="Jilin">Jilin (Jilin University)</option>
-                  <option value="Liaoning">Liaoning (Dalian Tech, Northeastern Univ)</option>
-                  <option value="Anhui">Anhui (USTC, Hefei Tech, Anhui Univ)</option>
-                  <option value="Shandong">Shandong (Shandong Univ, Ocean Univ, Petroleum)</option>
-                  <option value="Hunan">Hunan (Central South, Hunan Univ)</option>
-                  <option value="Fujian">Fujian (Xiamen Univ, Fuzhou Univ)</option>
-                  <option value="Tianjin">Tianjin (Nankai Univ, Tianjin Univ)</option>
-                  <option value="Henan">Henan (Zhengzhou University)</option>
-                  <option value="Jiangxi">Jiangxi (Nanchang University)</option>
-                  <option value="Gansu">Gansu (Lanzhou University)</option>
-                  <option value="Guangxi">Guangxi (Guilin Electronic Tech, Guangxi Univ)</option>
-                  <option value="Yunnan">Yunnan (Yunnan University)</option>
-                  <option value="Shanxi">Shanxi (Taiyuan Tech)</option>
-                  <option value="Xinjiang">Xinjiang (Xinjiang University)</option>
+                <select id="filter-regions" class="form-control" multiple size="7">
+                  <option value="All" selected>All Major Regions (National Discovery)</option>
+                  <option value="Beijing">Beijing</option>
+                  <option value="Shanghai">Shanghai</option>
+                  <option value="Jiangsu">Jiangsu</option>
+                  <option value="Zhejiang">Zhejiang</option>
+                  <option value="Guangdong">Guangdong</option>
+                  <option value="Shaanxi">Shaanxi</option>
+                  <option value="Hubei">Hubei</option>
+                  <option value="Sichuan">Sichuan</option>
+                  <option value="Chongqing">Chongqing</option>
+                  <option value="Heilongjiang">Heilongjiang</option>
+                  <option value="Anhui">Anhui</option>
+                  <option value="Shandong">Shandong</option>
+                  <option value="Hunan">Hunan</option>
+                  <option value="Tianjin">Tianjin</option>
+                  <option value="Henan">Henan</option>
+                  <option value="Fujian">Fujian</option>
+                  <option value="Liaoning">Liaoning</option>
+                  <option value="Jilin">Jilin</option>
+                  <option value="Gansu">Gansu</option>
+                  <option value="Guangxi">Guangxi</option>
+                  <option value="Yunnan">Yunnan</option>
+                  <option value="Jiangxi">Jiangxi</option>
+                  <option value="Shanxi">Shanxi</option>
+                  <option value="Xinjiang">Xinjiang</option>
                 </select>
-                <span class="hint">Hold Ctrl to select multiple provinces</span>
+                <span class="form-hint">Tip: Hold Ctrl/Cmd to select multiple provinces</span>
               </div>
 
               <div class="form-group">
@@ -180,153 +193,227 @@
 
                 <label for="filter-discipline" class="mt-2">Target Academic Discipline:</label>
                 <select id="filter-discipline" class="form-control">
-                  <option value="Computer Science">Computer Science & Engineering</option>
+                  <option value="Computer Science">Computer Science & Technology</option>
                   <option value="Artificial Intelligence">Artificial Intelligence & Robotics</option>
-                  <option value="Software Engineering">Software Engineering</option>
+                  <option value="Software Engineering">Software Engineering & Information Security</option>
                 </select>
+              </div>
 
-                <label for="filter-keyword" class="mt-2">Search University Name, Native Chinese, or Domain:</label>
-                <input type="text" id="filter-keyword" class="form-control" placeholder="e.g. BUPT, 邮电, Shenzhen, Dianzi, CAS, zju.edu.cn...">
-
-                <button class="btn btn-primary btn-block mt-3" onclick="runRegionalFilter()">Search Universities & Resolve Portals</button>
+              <div class="form-group flex-col-between">
+                <div>
+                  <label for="filter-keyword">Search by Name, Chinese, or Domain:</label>
+                  <input type="text" id="filter-keyword" class="form-control" placeholder="e.g. BUPT, 邮电, Shenzhen, Dianzi, zju.edu.cn..." />
+                </div>
+                
+                <div class="search-action-box mt-3">
+                  <button id="btn-run-discovery" class="btn btn-primary btn-block btn-interactive" onclick="runRegionalFilter()">
+                    <span id="btn-discovery-spinner" class="spinner-inline hidden"></span>
+                    <span id="btn-discovery-text">🔍 Execute Live Discovery & Resolve Endpoints</span>
+                  </button>
+                  <span class="form-hint text-center mt-1">Queries live internet registry with zero fabricated data.</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Mode B: Direct URL Input -->
-          <div id="mode-manual-container" class="discovery-mode-box hidden">
+          <!-- Direct URL Intake Form -->
+          <div id="mode-manual-container" class="filter-panel mt-3 hidden">
             <div class="form-group">
               <label for="intake-urls">Paste Target Department Directory URLs (.edu.cn only):</label>
-              <textarea id="intake-urls" rows="5" class="form-control" placeholder="http://cs.tsinghua.edu.cn/faculty&#10;http://ai.pku.edu.cn/supervisors&#10;http://cst.zju.edu.cn/teachers"></textarea>
-              <span class="hint">One URL per line. Must be official accredited Chinese university domains.</span>
-              <button class="btn btn-primary mt-2" onclick="calculateCostEstimateFromUrls()">Calculate Pre-Run Estimate</button>
+              <textarea id="intake-urls" rows="5" class="form-control mono-input" placeholder="http://cs.tsinghua.edu.cn/faculty&#10;http://ai.pku.edu.cn/supervisors&#10;http://cst.zju.edu.cn/teachers"></textarea>
+              <span class="form-hint">One URL per line. Must be official accredited Chinese university domains (.edu.cn).</span>
+              <button id="btn-manual-estimate" class="btn btn-primary mt-2 btn-interactive" onclick="calculateCostEstimateFromUrls()">
+                <span class="spinner-inline hidden"></span>
+                <span>Calculate Pre-Run Estimate</span>
+              </button>
             </div>
           </div>
 
-          <!-- Discovered Universities & Department Endpoints List -->
-          <div id="discovered-endpoints-container" class="mt-3 hidden">
-            <div class="flex-between">
-              <h3>Discovered University Portals (<span id="matched-univ-count">0</span> Universities Resolved)</h3>
-              <div>
-                <button class="btn btn-secondary mr-2" onclick="clearDiscoveredUniversities()">Clear Results</button>
-                <button class="btn btn-success" onclick="prepareEstimateForMatched()">Proceed to Cost Gate</button>
+          <!-- Real-Time Operation Progress & Status Box (Long-Running Task Tracker) -->
+          <div id="operation-progress-card" class="progress-tracker-card mt-3 hidden">
+            <div class="tracker-header">
+              <div class="tracker-status-left">
+                <span class="pulse-ring"></span>
+                <div>
+                  <span id="tracker-stage-badge" class="badge badge-primary">STAGE 1: INTERNET QUERY</span>
+                  <h4 id="tracker-message" class="tracker-title mt-1">Executing Live SPARQL Query to Wikidata Registry...</h4>
+                </div>
+              </div>
+              <div class="tracker-actions">
+                <span id="tracker-elapsed" class="mono-timer">00:00</span>
+                <button class="btn btn-secondary btn-sm ml-2" onclick="refreshActiveProgress(this)">↻ Refresh Feed</button>
               </div>
             </div>
-            <div class="table-responsive mt-2">
-              <table class="data-table">
+
+            <div class="progress-bar-container mt-2">
+              <div class="progress-track">
+                <div id="tracker-bar-fill" class="progress-fill" style="width: 15%;"></div>
+              </div>
+              <div class="progress-meta mt-1">
+                <span id="tracker-percentage" class="progress-percent">15% Completed</span>
+                <span id="tracker-details" class="progress-subtext">Contacting Wikimedia SPARQL endpoints...</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Discovered Universities Table Container (With Scrollbar & Row Numbers) -->
+          <div id="discovered-endpoints-container" class="results-container mt-4 hidden">
+            <div class="table-action-header">
+              <div class="header-meta">
+                <h3>Discovered University Portals (<span id="matched-univ-count" class="highlight-count">0</span> Institutions)</h3>
+                <span class="table-subtitle">Official verified portals ready for supervisor extraction</span>
+              </div>
+              <div class="action-buttons">
+                <button class="btn btn-secondary btn-sm" onclick="clearDiscoveredUniversities()">Clear Results</button>
+                <button class="btn btn-secondary btn-sm" onclick="runRegionalFilter()">↻ Refresh Discovery</button>
+                <button class="btn btn-success btn-sm" onclick="prepareEstimateForMatched()">Proceed to Cost Gate ➔</button>
+              </div>
+            </div>
+
+            <!-- Custom Scrollable Table Container -->
+            <div class="table-scroll-container">
+              <table class="enterprise-table">
                 <thead>
                   <tr>
-                    <th style="width: 50px; text-align: center;">#</th>
-                    <th>University</th>
+                    <th class="col-num">#</th>
+                    <th>University Name</th>
+                    <th>Native Name</th>
                     <th>Region</th>
-                    <th>Tier</th>
+                    <th>Institutional Tier</th>
                     <th>Resolved CS/AI Department Endpoints</th>
                   </tr>
                 </thead>
-                <tbody id="matched-endpoints-tbody"></tbody>
+                <tbody id="matched-endpoints-tbody">
+                  <!-- Dynamically populated -->
+                </tbody>
               </table>
             </div>
           </div>
 
           <!-- Pre-run Cost Gate Modal / Box -->
-          <div id="cost-estimate-card" class="cost-card hidden">
-            <h3>Pre-Run Cost & Workload Breakdown</h3>
-            <p class="subtitle" style="margin-bottom: 0.5rem;">Crawlers and LLM synthesis remain LOCKED until you review and click Approve.</p>
-            <div class="metrics-grid">
-              <div class="metric-box">
-                <span class="label">Universities</span>
-                <span id="est-univs" class="val">0</span>
+          <div id="cost-estimate-card" class="cost-gate-card mt-4 hidden">
+            <div class="cost-gate-header">
+              <div class="gate-title-group">
+                <span class="gate-icon">⚖️</span>
+                <div>
+                  <h3>Pre-Run Cost & Workload Gate</h3>
+                  <p class="subtitle">Scrapers and LLM synthesis remain locked until explicitly approved by the operator.</p>
+                </div>
               </div>
-              <div class="metric-box">
-                <span class="label">Parallel Crawlers</span>
-                <span id="est-depts" class="val">0</span>
-              </div>
-              <div class="metric-box">
-                <span class="label">Est. Master Supervisors</span>
-                <span id="est-faculty" class="val">0</span>
-              </div>
-              <div class="metric-box">
-                <span class="label">Est. Gemini Tokens</span>
-                <span id="est-tokens" class="val">0</span>
-                <span class="hint" style="font-size: 0.72rem; color: #0284c7; display: block; margin-top: 4px;">(Crawling is $0 / 0 tokens; Tokens used ONLY for downstream drafts)</span>
-              </div>
-              <div class="metric-box">
-                <span class="label">Est. Runtime</span>
-                <span id="est-runtime" class="val">0s</span>
+              <div class="gate-status-pill">
+                <span class="status-indicator locked"></span> Gate Status: <strong id="gate-status-text">LOCKED</strong>
               </div>
             </div>
-            <div class="gate-actions">
-              <div class="gate-status">
-                <span class="status-indicator locked"></span> Gate Status: <strong id="gate-status-text">LOCKED (Approval Required)</strong>
-              </div>
-              <button id="btn-approve-gate" class="btn btn-success" onclick="approveCostGate()">Approve & Launch Parallel Harvesters</button>
-            </div>
-          </div>
-        </section>
 
-        <!-- Section 2: University & Feasibility Directory -->
-        <section id="tab-universities" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">02 / INSTITUTIONAL DIRECTORY</span>
-          </div>
-          <div class="flex-between">
-            <div>
-              <h2>University Feasibility & Scholarship Matrix</h2>
-              <p class="subtitle">Accredited Chinese institutions categorized into Tier 1 Dream (Project 985/C9), Tier 2 Target (Project 211), and Tier 3 Safety.</p>
+            <div class="metrics-grid mt-3">
+              <div class="metric-card">
+                <span class="metric-label">Target Universities</span>
+                <span id="est-univs" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Parallel Crawler Tasks</span>
+                <span id="est-depts" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Estimated Master Supervisors</span>
+                <span id="est-faculty" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Estimated Gemini Tokens</span>
+                <span id="est-tokens" class="metric-val">0</span>
+                <span class="metric-subnote">Web crawl: $0 | Tokens: Downstream drafts only</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Estimated Runtime</span>
+                <span id="est-runtime" class="metric-val">0s</span>
+              </div>
             </div>
-            <div>
-              <button class="btn btn-secondary" onclick="loadUniversities()">Refresh Directory</button>
+
+            <div class="cost-gate-actions mt-3">
+              <button id="btn-approve-gate" class="btn btn-success btn-lg btn-interactive" onclick="approveCostGate()">
+                <span id="btn-approve-spinner" class="spinner-inline hidden"></span>
+                <span id="btn-approve-text">✓ Approve Gate & Launch Parallel Harvesters</span>
+              </button>
             </div>
           </div>
-          
-          <div class="table-responsive mt-3">
-            <table class="data-table">
+
+        </div>
+      </section>
+
+      <!-- Section 2: University & Feasibility Directory -->
+      <section id="tab-universities" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">02</span>
+            <span class="indicator-title">INSTITUTIONAL DIRECTORY</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-secondary btn-sm" onclick="loadUniversities()">↻ Refresh Directory</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>University Feasibility & Scholarship Matrix</h2>
+            <p class="subtitle">Indexed institutions categorized into Tier 1 Dream (Project 985/C9), Tier 2 Target (Project 211), and Tier 3 Safety. Stored persistently in MongoDB.</p>
+          </div>
+
+          <!-- Custom Scrollable Table Container -->
+          <div class="table-scroll-container mt-3">
+            <table class="enterprise-table">
               <thead>
                 <tr>
+                  <th class="col-num">#</th>
                   <th>University Name</th>
                   <th>Native Name</th>
-                  <th>Domain</th>
+                  <th>Official Domain</th>
                   <th>CS Rank</th>
                   <th>Feasibility Tier</th>
-                  <th>Scholarships Available</th>
-                  <th>App Fee</th>
+                  <th>Available Scholarships</th>
+                  <th>Application Fee</th>
                   <th>Outreach Strategy</th>
                 </tr>
               </thead>
               <tbody id="universities-tbody">
-                <!-- Dynamically populated from API/DB -->
+                <!-- Dynamically populated from MongoDB -->
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- Section 3: Faculty Roster & Extraction Stream -->
-        <section id="tab-faculty" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">03 / SUPERVISOR ROSTER</span>
+      <!-- Section 3: Faculty Roster & Extraction Stream -->
+      <section id="tab-faculty" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">03</span>
+            <span class="indicator-title">SUPERVISOR ROSTER</span>
           </div>
-          <div class="flex-between">
-            <div>
-              <h2>Verified Graduate Supervisors Roster</h2>
-              <p class="subtitle">Faculty verified with Master's (硕导) or Ph.D. (博导) supervisory credentials from official .edu.cn sources.</p>
-            </div>
-            <div>
-              <button class="btn btn-secondary" onclick="loadFaculty()">Refresh Roster</button>
-            </div>
+          <div class="card-actions">
+            <button class="btn btn-secondary btn-sm" onclick="loadFaculty()">↻ Refresh Roster</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Verified Graduate Supervisors Roster</h2>
+            <p class="subtitle">Faculty verified with Master's (硕士生导师 / 硕导) credentials from official .edu.cn sites. Every record is verified with an anti-negation filter and cryptographic SHA-256 raw HTML lineage.</p>
           </div>
 
-          <div class="table-responsive mt-3">
-            <table class="data-table">
+          <!-- Custom Scrollable Table Container -->
+          <div class="table-scroll-container mt-3">
+            <table class="enterprise-table">
               <thead>
                 <tr>
+                  <th class="col-num">#</th>
                   <th>Supervisor Name</th>
                   <th>University</th>
                   <th>Department</th>
                   <th>Qualification</th>
-                  <th>Email</th>
-                  <th>Research Areas</th>
-                  <th>Audit Hash</th>
-                  <th>Source</th>
+                  <th>Contact Email</th>
+                  <th>Research Focus Areas</th>
+                  <th>Lineage SHA-256</th>
+                  <th>Source Evidence</th>
                 </tr>
               </thead>
               <tbody id="faculty-tbody">
@@ -334,40 +421,152 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- Section 4: Email Review Workspace & Approval Staging -->
-        <section id="tab-review" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">04 / EMAIL STAGING & GUARDRAILS</span>
+      <!-- Section 4: Dynamic Prompt Management & AI Directives (NEW REQUIREMENT) -->
+      <section id="tab-prompts" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">04</span>
+            <span class="indicator-title">PROMPTS & AI DIRECTIVES</span>
           </div>
-          <h2>Split-Pane Email Review & Approval Staging</h2>
-          <p class="subtitle">Review Gemini-synthesized research digests and inspect/edit personalized cold outreach drafts (<200 words).</p>
+          <div class="card-actions">
+            <span class="status-note">Persisted in MongoDB: collection 'prompts'</span>
+            <button class="btn btn-secondary btn-sm ml-2" onclick="loadPrompts()">↻ Reload Prompts</button>
+          </div>
+        </div>
 
-          <div class="split-pane">
-            <!-- Left: Faculty Digest & Context -->
-            <div class="pane pane-left">
-              <h3>Faculty Synthesis Digest</h3>
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Prompt Management & Custom AI Directives</h2>
+            <p class="subtitle">Provide, view, edit, and version the system and user prompt templates used for research summarization and cold outreach generation. All edits persist in MongoDB in real time.</p>
+          </div>
+
+          <div class="prompts-manager-layout mt-3">
+            <!-- Left: Prompt Selector & Info -->
+            <div class="prompt-sidebar-column">
               <div class="form-group">
-                <label>Select Draft to Review:</label>
+                <label for="select-prompt-record">Select Prompt Record from DB:</label>
+                <select id="select-prompt-record" class="form-control" onchange="onPromptSelected()">
+                  <!-- Populated from GET /api/v1/prompts -->
+                </select>
+              </div>
+
+              <div class="prompt-meta-card mt-2">
+                <div class="detail-row">
+                  <span class="detail-label">Prompt ID:</span>
+                  <span id="prompt-id-display" class="detail-val mono">-</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Target Stage:</span>
+                  <span id="prompt-stage-display" class="badge version">-</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Active Status:</span>
+                  <span id="prompt-active-display" class="badge window-open">ACTIVE</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Version:</span>
+                  <span id="prompt-version-display" class="detail-val">v1</span>
+                </div>
+              </div>
+
+              <div class="prompt-vars-box mt-3">
+                <span class="detail-label">Available Variables (Click to Insert):</span>
+                <div id="prompt-variable-chips" class="chips-container mt-1">
+                  <!-- Chips like {{professor_name}}, {{university}} -->
+                </div>
+              </div>
+
+              <div class="action-btn-stack mt-3">
+                <button class="btn btn-primary btn-block" onclick="savePromptChanges()">💾 Save Changes to MongoDB</button>
+                <button class="btn btn-success btn-block mt-2" onclick="activateCurrentPrompt()">✓ Set as Active Engine Prompt</button>
+                <button class="btn btn-secondary btn-block mt-2" onclick="createNewPromptModal()">+ Create New Prompt Record</button>
+              </div>
+            </div>
+
+            <!-- Right: Prompt Text Editor -->
+            <div class="prompt-editor-column">
+              <div class="form-group">
+                <label for="prompt-title-input">Prompt Title / Description:</label>
+                <input type="text" id="prompt-title-input" class="form-control" />
+              </div>
+
+              <div class="form-group mt-2">
+                <label for="prompt-system-text">System Persona & Guardrail Instructions:</label>
+                <textarea id="prompt-system-text" rows="5" class="form-control mono-input"></textarea>
+                <span class="form-hint">Governs LLM behavioral rules, constraints (e.g. word count &lt;200), and tone.</span>
+              </div>
+
+              <div class="form-group mt-2">
+                <label for="prompt-template-text">User Prompt Synthesis Template:</label>
+                <textarea id="prompt-template-text" rows="8" class="form-control mono-input"></textarea>
+                <span class="form-hint">Use <code>{{variable_name}}</code> for dynamic profile data interpolation.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 5: Email Review Workspace & Approval Staging -->
+      <section id="tab-review" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">05</span>
+            <span class="indicator-title">EMAIL REVIEW & STAGING</span>
+          </div>
+          <div class="card-actions">
+            <span class="status-note">Human-In-The-Loop Approval Gate</span>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Split-Pane Outreach Review Workspace</h2>
+            <p class="subtitle">Inspect Gemini-synthesized research summaries and review/edit personalized outreach drafts (&lt;200 words). Emails cannot be sent without explicit operator approval.</p>
+          </div>
+
+          <div class="split-pane-layout mt-3">
+            <!-- Left Pane: Synthesized Research Digest -->
+            <div class="pane-column pane-summary">
+              <div class="pane-header">
+                <h3>Faculty Research Synthesis</h3>
+              </div>
+              <div class="form-group">
+                <label for="select-draft">Select Pending Draft to Inspect:</label>
                 <select id="select-draft" class="form-control" onchange="onDraftSelected()">
                   <option value="">-- Choose a pending draft --</option>
                 </select>
               </div>
 
-              <div id="review-profile-details" class="details-box">
-                <p><strong>Target Professor:</strong> <span id="rev-prof-name">-</span></p>
-                <p><strong>University:</strong> <span id="rev-prof-univ">-</span></p>
-                <p><strong>Email:</strong> <span id="rev-prof-email">-</span></p>
-                <hr style="margin: 0.75rem 0; border: none; border-top: 1px solid var(--border-subtle);"/>
-                <p><strong>Factual Research Digest:</strong></p>
-                <p id="rev-prof-digest" class="digest-text">Select a draft to view the synthesized lab research digest.</p>
+              <div id="review-profile-details" class="profile-card-details">
+                <div class="detail-row">
+                  <span class="detail-label">Target Professor:</span>
+                  <span id="rev-prof-name" class="detail-val">-</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">University:</span>
+                  <span id="rev-prof-univ" class="detail-val">-</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Contact Email:</span>
+                  <span id="rev-prof-email" class="detail-val mono">-</span>
+                </div>
+                <div class="digest-section mt-2">
+                  <span class="detail-label">Synthesized Lab Research Focus:</span>
+                  <div id="rev-prof-digest" class="digest-content-box">Select a draft above to inspect lab synthesis.</div>
+                </div>
               </div>
             </div>
 
-            <!-- Right: Editable Outreach Draft -->
-            <div class="pane pane-right">
-              <h3>Customized Outreach Email (<200 Words)</h3>
+            <!-- Right Pane: Editable Email Draft -->
+            <div class="pane-column pane-editor">
+              <div class="pane-header flex-between">
+                <h3>Customized Outreach Email</h3>
+                <span id="draft-status-badge" class="badge badge-neutral">PENDING_REVIEW</span>
+              </div>
+
               <div class="form-group">
                 <label for="rev-subject">Subject Line:</label>
                 <input type="text" id="rev-subject" class="form-control" />
@@ -375,62 +574,74 @@
 
               <div class="form-group">
                 <label for="rev-body">Email Body (Plain Text):</label>
-                <textarea id="rev-body" rows="12" class="form-control" oninput="updateWordCount()"></textarea>
+                <textarea id="rev-body" rows="11" class="form-control mono-input" oninput="updateWordCount()"></textarea>
                 <div class="flex-between mt-1">
-                  <span class="hint">Words: <strong id="word-count">0</strong> / 200 max. Guardrail: No GPA mentions.</span>
-                  <span id="draft-status-badge" class="badge version">PENDING_REVIEW</span>
+                  <span class="form-hint">Word Count: <strong id="word-count">0</strong> / 200 words max. Guardrail: Zero GPA mention.</span>
+                  <span class="form-hint">Auto-attaches: Academic CV (PDF)</span>
                 </div>
               </div>
 
-              <div class="review-actions mt-3">
-                <button class="btn btn-success" onclick="approveCurrentDraft()">Approve for Dispatch</button>
-                <button class="btn btn-warning" onclick="regenerateCurrentDraft()">Regenerate with Gemini</button>
-                <button class="btn btn-danger" onclick="rejectCurrentDraft()">Discard Draft</button>
+              <div class="editor-actions mt-3">
+                <button class="btn btn-success" onclick="approveCurrentDraft()">✓ Approve for Dispatch</button>
+                <button class="btn btn-warning" onclick="regenerateCurrentDraft()">🔄 Regenerate with Gemini</button>
+                <button class="btn btn-danger" onclick="rejectCurrentDraft()">✕ Discard Draft</button>
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- Section 5: Outbox Dispatcher & Delivery Scheduler -->
-        <section id="tab-dispatch" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">05 / OUTBOX DISPATCHER</span>
+      <!-- Section 6: Outbox Dispatcher & Delivery Scheduler -->
+      <section id="tab-dispatch" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">06</span>
+            <span class="indicator-title">OUTBOX DISPATCHER</span>
           </div>
-          <h2>Outbox Dispatcher & Smart Delivery Scheduler</h2>
-          <p class="subtitle">Strictly dispatches APPROVED drafts within CST working hours (09:00 - 16:30) with 90-240s randomized jitter.</p>
+          <div class="card-actions">
+            <span class="status-note">CST Window & Rate Enforced</span>
+          </div>
+        </div>
 
-          <div class="grid-2">
-            <div class="queue-summary">
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Approved Dispatch Queue & Rate Controller</h2>
+            <p class="subtitle">Dispatches only approved drafts within China Standard Time working hours (09:00 - 16:30 CST) with 90-240s randomized jitter.</p>
+          </div>
+
+          <div class="dispatch-summary-grid mt-3">
+            <div class="summary-box">
               <h3>Approved Queue Summary</h3>
-              <p style="margin-top: 0.25rem;">Drafts Approved & Ready in Database: <strong id="approved-count" style="color: var(--primary);">0</strong></p>
-              <div class="btn-group mt-3" style="display: flex; gap: 0.5rem;">
-                <button class="btn btn-primary" onclick="sendBatch(false)">Dispatch Batch (With Jitter)</button>
-                <button class="btn btn-secondary" onclick="sendBatch(true)">Dry-Run Test Batch</button>
+              <p class="mt-1">Ready for Dispatch: <strong id="approved-count" class="highlight-count">0</strong></p>
+              <div class="btn-group mt-3">
+                <button class="btn btn-primary" onclick="sendBatch(false)">🚀 Dispatch Batch (With Jitter)</button>
+                <button class="btn btn-secondary" onclick="sendBatch(true)">🧪 Dry-Run Test Batch</button>
               </div>
             </div>
 
-            <div class="scheduler-params" style="background: var(--bg-subtle); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-              <h3 style="font-size: 0.95rem;">Delivery Safety Protocols</h3>
-              <ul style="margin-left: 1.25rem; font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.6;">
-                <li><strong>CST Window:</strong> 09:00 – 16:30 China Standard Time (UTC+8)</li>
-                <li><strong>Hourly Cap:</strong> Max 10 emails/hour</li>
-                <li><strong>Daily Cap:</strong> Max 25 emails/day</li>
-                <li><strong>Jitter Pause:</strong> 90 to 240 seconds randomized between dispatches</li>
-                <li><strong>Attachment:</strong> Auto-attaches Academic CV (PDF)</li>
+            <div class="safety-rules-box">
+              <h4>Active Delivery Safety Protocols</h4>
+              <ul class="safety-bullets">
+                <li><strong>CST Operating Window:</strong> 09:00 – 16:30 CST (UTC+8) strictly enforced</li>
+                <li><strong>Hourly Volume Limit:</strong> Maximum 10 emails/hour</li>
+                <li><strong>Daily Volume Limit:</strong> Maximum 25 emails/day</li>
+                <li><strong>Anti-Spam Jitter:</strong> 90 to 240 seconds randomized delay</li>
+                <li><strong>Triple Gate Protection:</strong> Blocked if Master Gate is ACTIVE or Sandbox is ON</li>
               </ul>
             </div>
           </div>
 
-          <div class="table-responsive mt-3">
-            <h3 style="padding: 0.75rem 1rem 0; font-size: 0.95rem;">Approved Dispatch Queue</h3>
-            <table class="data-table">
+          <!-- Custom Scrollable Table Container -->
+          <div class="table-scroll-container mt-3">
+            <table class="enterprise-table">
               <thead>
                 <tr>
+                  <th class="col-num">#</th>
                   <th>Draft ID</th>
-                  <th>Recipient</th>
+                  <th>Target Recipient</th>
                   <th>University</th>
-                  <th>Subject</th>
-                  <th>Status</th>
+                  <th>Subject Line</th>
+                  <th>Approval Status</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -439,61 +650,66 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- Section 6: Analytics & Response Tracker -->
-        <section id="tab-analytics" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">06 / TELEMETRY & TRACKING</span>
+      <!-- Section 7: Analytics & Response Tracker -->
+      <section id="tab-analytics" class="enterprise-card page-section mt-4">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">07</span>
+            <span class="indicator-title">TELEMETRY & RESPONSE TRACKER</span>
           </div>
-          <div class="flex-between">
-            <div>
-              <h2>Campaign Analytics & Response Tracker</h2>
-              <p class="subtitle">Pixel open receipts and IMAP inbound reply telemetry cross-referencing.</p>
-            </div>
-            <div>
-              <button class="btn btn-secondary" onclick="pollIMAPReplies()">Poll IMAP Inbox Now</button>
-            </div>
+          <div class="card-actions">
+            <button class="btn btn-secondary btn-sm" onclick="pollIMAPReplies()">📥 Poll IMAP Inbox Now</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Campaign Analytics & IMAP Response Tracker</h2>
+            <p class="subtitle">Pixel open telemetry and inbound IMAP reply classification across all dispatched applications.</p>
           </div>
 
           <div class="metrics-grid mt-3">
-            <div class="metric-box">
-              <span class="label">Total Discovered</span>
-              <span id="metric-discovered" class="val">0</span>
+            <div class="metric-card">
+              <span class="metric-label">Total Discovered</span>
+              <span id="metric-discovered" class="metric-val">0</span>
             </div>
-            <div class="metric-box">
-              <span class="label">Approved</span>
-              <span id="metric-approved" class="val">0</span>
+            <div class="metric-card">
+              <span class="metric-label">Approved Drafts</span>
+              <span id="metric-approved" class="metric-val">0</span>
             </div>
-            <div class="metric-box">
-              <span class="label">Total Sent (250 OK)</span>
-              <span id="metric-sent" class="val">0</span>
+            <div class="metric-card">
+              <span class="metric-label">Dispatched (250 OK)</span>
+              <span id="metric-sent" class="metric-val">0</span>
             </div>
-            <div class="metric-box">
-              <span class="label">Opened (Pixel)</span>
-              <span id="metric-opened" class="val">0</span>
+            <div class="metric-card">
+              <span class="metric-label">Opened (Pixel)</span>
+              <span id="metric-opened" class="metric-val">0</span>
             </div>
-            <div class="metric-box">
-              <span class="label">Responses Received</span>
-              <span id="metric-replies" class="val">0</span>
+            <div class="metric-card">
+              <span class="metric-label">Replies Received</span>
+              <span id="metric-replies" class="metric-val highlight-green">0</span>
             </div>
-            <div class="metric-box">
-              <span class="label">Avg Reply Latency</span>
-              <span id="metric-latency" class="val">0.0h</span>
+            <div class="metric-card">
+              <span class="metric-label">Avg Reply Latency</span>
+              <span id="metric-latency" class="metric-val">0.0h</span>
             </div>
           </div>
 
-          <div class="table-responsive mt-4">
-            <h3 style="padding: 0.75rem 1rem 0; font-size: 0.95rem;">Inbound Responses Detected via IMAP</h3>
-            <table class="data-table">
+          <!-- Custom Scrollable Table Container -->
+          <div class="table-scroll-container mt-4">
+            <table class="enterprise-table">
               <thead>
                 <tr>
+                  <th class="col-num">#</th>
                   <th>Professor</th>
                   <th>From Address</th>
                   <th>Subject</th>
-                  <th>Snippet</th>
-                  <th>Received At</th>
-                  <th>Latency</th>
+                  <th>Response Snippet</th>
+                  <th>Received Timestamp</th>
+                  <th>Reply Latency</th>
                 </tr>
               </thead>
               <tbody id="replies-tbody">
@@ -501,42 +717,48 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- Section 7: System Terminal & Live Log Streaming -->
-        <section id="tab-terminal" class="page-section card">
-          <div class="section-badge-header">
-            <span class="section-tag">07 / LIVE SYSTEM CONSOLE</span>
+      <!-- Section 8: System Terminal & Live Log Streaming -->
+      <section id="tab-terminal" class="enterprise-card page-section mt-4 mb-5">
+        <div class="card-header">
+          <div class="section-indicator">
+            <span class="indicator-badge">08</span>
+            <span class="indicator-title">LIVE SYSTEM CONSOLE</span>
           </div>
-          <div class="flex-between">
-            <div>
-              <h2>System Terminal & Live WebSocket Log Stream</h2>
-              <p class="subtitle">Real-time trace logs isolated across Scraper, Normalizer, LLMAgent, SMTPEngine, and IMAPHarvester.</p>
-            </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
-              <select id="log-filter" class="form-control" onchange="filterLogs()" style="width: auto;">
-                <option value="ALL">All Modules</option>
-                <option value="ScraperWorker">ScraperWorker</option>
-                <option value="Normalizer">Normalizer</option>
-                <option value="LLMAgent">LLMAgent</option>
-                <option value="SMTPEngine">SMTPEngine</option>
-                <option value="IMAPHarvester">IMAPHarvester</option>
-              </select>
-              <button class="btn btn-secondary" onclick="clearTerminal()">Clear</button>
-            </div>
+          <div class="card-actions">
+            <select id="log-filter" class="form-control form-control-sm" onchange="filterLogs()">
+              <option value="ALL">All Modules</option>
+              <option value="DiscoveryService">DiscoveryService</option>
+              <option value="ScraperWorker">ScraperWorker</option>
+              <option value="PromptService">PromptService</option>
+              <option value="Normalizer">Normalizer</option>
+              <option value="LLMAgent">LLMAgent</option>
+              <option value="SMTPEngine">SMTPEngine</option>
+              <option value="IMAPHarvester">IMAPHarvester</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="clearTerminal()">Clear Console</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="intro-headline">
+            <h2>Real-Time WebSocket Log Stream</h2>
+            <p class="subtitle">Direct operational trace logs across all asynchronous workers, long-running scrapers, and pipeline stages.</p>
           </div>
 
-          <div id="terminal-window" class="terminal-box mt-3">
-            <div class="terminal-line system">[SYSTEM] WebSocket log stream initialized. Awaiting worker activity...</div>
+          <div id="terminal-window" class="enterprise-terminal mt-3">
+            <div class="terminal-line system">[SYSTEM] WebSocket console connection initialized. Ready for worker trace logs...</div>
           </div>
-        </section>
+        </div>
+      </section>
 
-      </main>
-    </div> <!-- .content-wrapper -->
-  </div> <!-- .app-layout -->
+    </main>
+  </div>
 
-  <!-- Floating Jump-to-Top Button -->
-  <button class="btn-to-top" onclick="window.scrollTo({ top: 0, behavior: 'smooth' }); document.getElementById('content-scroll-container').scrollTo({ top: 0, behavior: 'smooth' });" title="Scroll to Top">
+  <!-- Jump-to-Top Floating Button -->
+  <button id="btn-to-top" class="btn-to-top" onclick="window.scrollTo({ top: 0, behavior: 'smooth' });" title="Scroll to Top">
     ↑
   </button>
 

@@ -76,6 +76,7 @@ class ChangeStreamReactor:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        self._task = None
         logger.info("MongoDB Change Stream reactor stopped.")
 
 

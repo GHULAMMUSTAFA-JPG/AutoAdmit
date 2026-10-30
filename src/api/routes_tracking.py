@@ -97,3 +97,18 @@ async def poll_inbound_replies(user: str = Depends(get_current_user)):
     detected = await imap_harvester.poll_inbox_sync(sent_map)
     return detected
 
+
+@router.get("/replies", response_model=List[InboundReply])
+async def get_inbound_replies(user: str = Depends(get_current_user)):
+    """Returns detected inbound replies from database or memory cache."""
+    from src.core.database import db_manager
+    if db_manager.is_connected and db_manager.db is not None:
+        cursor = db_manager.get_collection("inbound_replies").find({})
+        results = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            results.append(InboundReply(**doc))
+        if results:
+            return results
+    return list(imap_harvester.cached_replies.values())
+

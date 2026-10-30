@@ -68,6 +68,22 @@ class Settings(BaseSettings):
     IMAP_PASSWORD: str = Field(default="")
     IMAP_POLL_INTERVAL_MINUTES: int = Field(default=15)
 
+    # Live Crawler Policy (Phase 1)
+    CRAWLER_USER_AGENT: str = Field(
+        default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    WIKIMEDIA_USER_AGENT: str = Field(
+        default="AutoAdmitEngine/1.0 (https://github.com/autoadmit/engine; autoadmit-research@users.noreply.github.com) python-httpx"
+    )
+    CRAWL_CONCURRENCY: int = Field(default=10, description="Max parallel crawler workers (PRD: 10-30).")
+    CRAWL_DELAY_SECONDS: float = Field(default=0.5, description="Minimum delay between requests to the same host.")
+    CRAWL_TIMEOUT_SECONDS: float = Field(default=15.0)
+    MAX_PROFILES_PER_DEPARTMENT: int = Field(default=80)
+    MAX_DIRECTORY_PAGES: int = Field(default=5)
+    MAX_UNIVERSITIES_PER_RESOLVE: int = Field(default=25)
+    RESPECT_ROBOTS_TXT: bool = Field(default=True)
+    ALLOW_LOCAL_TEST_HOSTS: bool = Field(default=False, description="Tests only: whitelist localhost/testserver.")
+
     # Public Tracking & Web Gateway
     TRACKING_BASE_URL: str = Field(default="http://localhost:8000")
 

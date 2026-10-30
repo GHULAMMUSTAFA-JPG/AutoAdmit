@@ -102,13 +102,29 @@ async def harvest_faculty_pool(
     for url in request.department_urls:
         try:
             html, final_url = await harvester.fetch_page(url)
-            profile = harvester.parse_profile_html(
-                html=html,
-                source_url=final_url,
-                university_name=request.university_name,
-                department_name=request.department_name
-            )
-            if profile:
+            # Detect whether endpoint is a faculty directory or a single profile
+            candidate_links = harvester.extract_profile_links(html, final_url)
+            found_profiles: List[FacultyProfile] = []
+            if candidate_links:
+                from src.config import settings
+                sem = asyncio.Semaphore(settings.MAX_CONCURRENT_REQUESTS)
+                found_profiles = await harvester.crawl_directory(
+                    directory_url=final_url,
+                    university_name=request.university_name,
+                    department_name=request.department_name,
+                    sem=sem
+                )
+            else:
+                profile = harvester.parse_profile_html(
+                    html=html,
+                    source_url=final_url,
+                    university_name=request.university_name,
+                    department_name=request.department_name
+                )
+                if profile:
+                    found_profiles.append(profile)
+
+            for profile in found_profiles:
                 # Deduplication key check
                 dedup_key = normalizer.generate_dedup_key(profile.email, profile.name, profile.university)
                 if dedup_key not in professors_cache:
@@ -159,13 +175,28 @@ async def harvest_batch_faculty(
         for url in target.department_urls:
             try:
                 html, final_url = await harvester.fetch_page(url)
-                profile = harvester.parse_profile_html(
-                    html=html,
-                    source_url=final_url,
-                    university_name=target.university_name,
-                    department_name=target.department_name
-                )
-                if profile:
+                candidate_links = harvester.extract_profile_links(html, final_url)
+                found_profiles: List[FacultyProfile] = []
+                if candidate_links:
+                    from src.config import settings
+                    sem = asyncio.Semaphore(settings.MAX_CONCURRENT_REQUESTS)
+                    found_profiles = await harvester.crawl_directory(
+                        directory_url=final_url,
+                        university_name=target.university_name,
+                        department_name=target.department_name,
+                        sem=sem
+                    )
+                else:
+                    single = harvester.parse_profile_html(
+                        html=html,
+                        source_url=final_url,
+                        university_name=target.university_name,
+                        department_name=target.department_name
+                    )
+                    if single:
+                        found_profiles.append(single)
+
+                for profile in found_profiles:
                     dedup_key = normalizer.generate_dedup_key(profile.email, profile.name, profile.university)
                     if dedup_key not in professors_cache:
                         professors_cache[dedup_key] = profile

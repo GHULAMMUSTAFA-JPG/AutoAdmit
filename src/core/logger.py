@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Set
+from typing import Set, Optional
 from fastapi import WebSocket
 from src.config import settings
 
@@ -15,40 +15,53 @@ active_log_websockets: Set[WebSocket] = set()
 
 class WebSocketLogHandler(logging.Handler):
     """Custom logging handler that broadcasts formatted log records to active WebSocket clients."""
+    _main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @classmethod
+    def set_loop(cls, loop: asyncio.AbstractEventLoop) -> None:
+        cls._main_loop = loop
 
     def emit(self, record: logging.LogRecord) -> None:
         if not active_log_websockets:
             return
 
         try:
-            timestamp = (
-                self.formatter.formatTime(record)
-                if self.formatter
-                else datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
-            )
+            if self.formatter and hasattr(self.formatter, "formatTime"):
+                try:
+                    timestamp = self.formatter.formatTime(record)
+                except Exception:
+                    timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+            else:
+                timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+
             log_entry = {
                 "timestamp": timestamp,
                 "level": record.levelname,
                 "module": record.name,
                 "message": record.getMessage()
             }
-            # Schedule broadcast in the running asyncio loop
+            # Schedule broadcast in the running asyncio loop or thread-safe fallback
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.broadcast(log_entry))
+                if loop.is_running():
+                    loop.create_task(self.broadcast(log_entry))
             except RuntimeError:
-                pass  # No running event loop in this context
+                if self._main_loop and self._main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self.broadcast(log_entry), self._main_loop)
         except Exception:
             self.handleError(record)
 
     async def broadcast(self, log_entry: dict) -> None:
+        if not active_log_websockets:
+            return
         disconnected = set()
-        for ws in active_log_websockets:
+        for ws in list(active_log_websockets):
             try:
                 await ws.send_json(log_entry)
             except Exception:
                 disconnected.add(ws)
-        active_log_websockets.difference_update(disconnected)
+        if disconnected:
+            active_log_websockets.difference_update(disconnected)
 
 
 def setup_logger(module_name: str) -> logging.Logger:

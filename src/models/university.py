@@ -1,4 +1,4 @@
-"""University and Feasibility Scoring Pydantic schemas."""
+"""University and discovery Pydantic schemas (all records originate from live internet sources)."""
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -7,9 +7,10 @@ from pydantic import BaseModel, Field
 
 
 class FeasibilityTier(str, Enum):
-    TIER_1_DREAM = "Tier 1 (Dream)"
-    TIER_2_TARGET = "Tier 2 (Target)"
-    TIER_3_SAFETY = "Tier 3 (Safety)"
+    """Rank category derived from live Project 985 / 211 membership data."""
+    TIER_1_DREAM = "Tier 1 (Dream)"      # Project 985 member
+    TIER_2_TARGET = "Tier 2 (Target)"    # Project 211 member (non-985)
+    TIER_3_SAFETY = "Tier 3 (Safety)"    # Other accredited institution
 
 
 class ScholarshipType(str, Enum):
@@ -20,26 +21,33 @@ class ScholarshipType(str, Enum):
 
 
 class DepartmentEndpoint(BaseModel):
-    name: str = Field(..., description="Department or School name (e.g., School of Computer Science)")
-    url: str = Field(..., description="Official directory URL on .edu.cn domain")
+    name: str = Field(..., description="Department or School name as published on the university site")
+    url: str = Field(..., description="Verified faculty directory URL on an official .edu.cn domain")
 
 
 class University(BaseModel):
     id: Optional[str] = None
+    wikidata_id: Optional[str] = Field(default=None, description="Wikidata entity id (live source lineage)")
     name: str = Field(..., description="English Name of University")
     chinese_name: Optional[str] = Field(default=None, description="Native Chinese name")
     domain: str = Field(..., description="Official educational domain e.g. tsinghua.edu.cn")
-    region: str = Field(default="National", description="Province or Municipal Region in China (e.g., Beijing, Shanghai, Jiangsu)")
-    tier: FeasibilityTier = Field(..., description="Dream / Target / Safety tier")
-    cs_ranking: Optional[int] = Field(default=None, description="National or global CS ranking")
+    website: Optional[str] = Field(default=None, description="Official website URL from the live source")
+    region: str = Field(default="Unknown", description="Province-level region resolved from live data")
+    tier: FeasibilityTier = Field(default=FeasibilityTier.TIER_3_SAFETY)
+    cs_ranking: Optional[int] = Field(default=None, description="Unset: no live ranking source configured")
     is_project_985: bool = Field(default=False)
     is_project_211: bool = Field(default=False)
+    is_double_first_class: bool = Field(default=False)
     scholarships_available: List[ScholarshipType] = Field(default_factory=list)
-    application_fee_rmb: int = Field(default=0, description="Application fee in RMB (0 if free)")
-    feasibility_notes: str = Field(default="", description="GPA compensation notes and outreach focus")
+    application_fee_rmb: Optional[int] = Field(default=None, description="Unknown unless scraped; never assumed")
+    feasibility_notes: str = Field(default="")
     department_endpoints: List[DepartmentEndpoint] = Field(default_factory=list)
-    is_seed: bool = Field(default=False, description="True for benchmark seed data; False for live internet-scraped records")
-    data_source: str = Field(default="live_crawled", description="Source marker: 'live_crawled' or 'benchmark_seed'")
+    website_verified: bool = Field(default=False, description="Official site fetched & confirmed on .edu.cn")
+    verified_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    is_seed: bool = Field(default=False)
+    data_source: str = Field(default="wikidata_live")
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -51,4 +59,3 @@ class PreRunCostEstimate(BaseModel):
     estimated_runtime_seconds: int
     is_approved: bool = False
     approved_at: Optional[datetime] = None
-

@@ -1,12 +1,13 @@
-// AutoAdmit Engine Frontend Application
+// AutoAdmit Enterprise Engine Frontend Application
 
 const API_BASE = "";
 let currentDrafts = [];
 let selectedDraft = null;
 let currentFilter = "ALL";
 let lastDiscoveredUniversities = [];
+let activeDiscoverySource = "combined";
 
-// Retrieve saved authentication header from localStorage or prompt
+// Authentication state management
 let authHeader = localStorage.getItem("autoadmit_auth") || "";
 
 function fetchWithAuth(url, options = {}) {
@@ -98,90 +99,68 @@ function lockSession() {
   showAuthOverlay();
 }
 
-// Tab Titles Mapping for One Big Page Flow
-const tabTitles = {
-  "tab-setup": "1. Campaign Setup & Resource Estimation",
-  "tab-universities": "2. University Feasibility & Scholarship Directory",
-  "tab-faculty": "3. Verified Faculty Supervisors Roster",
-  "tab-review": "4. Email Review Workspace & Approval Staging",
-  "tab-dispatch": "5. Outbox Dispatcher & Delivery Scheduler",
-  "tab-analytics": "6. Campaign Analytics & Inbound Reply Tracker",
-  "tab-terminal": "7. System Terminal & Live Log Streaming"
-};
-
-// Section Scrolling (One Big Page Flow)
-function switchTab(sectionId, clickedBtn = null) {
-  scrollToSection(sectionId, clickedBtn);
-}
-
-function scrollToSection(sectionId, clickedBtn = null) {
-  const target = document.getElementById(sectionId);
+// Enterprise Top Navigation Smooth Jump
+function smoothJump(event, targetId) {
+  if (event) event.preventDefault();
+  const target = document.getElementById(targetId);
   if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+    const headerOffset = 110;
+    const elementPosition = target.getBoundingClientRect().top;
+    const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
 
-  // Highlight active button
-  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-  const btn = clickedBtn || (typeof event !== "undefined" && event ? event.target.closest(".nav-item") : null);
-  if (btn) {
-    btn.classList.add("active");
-  } else {
-    document.querySelectorAll(".nav-item").forEach(item => {
-      const oc = item.getAttribute("onclick");
-      if (oc && oc.includes(sectionId)) {
-        item.classList.add("active");
-      }
+    window.scrollTo({
+      top: offsetPosition,
+      behavior: "smooth"
     });
   }
 
-  const titleEl = document.getElementById("current-view-title");
-  if (titleEl && tabTitles[sectionId]) {
-    titleEl.textContent = tabTitles[sectionId];
+  document.querySelectorAll(".nav-tab").forEach(tab => tab.classList.remove("active"));
+  if (event && event.currentTarget) {
+    event.currentTarget.classList.add("active");
   }
 }
 
-// Setup ScrollSpy / IntersectionObserver to highlight sidebar as user scrolls
+// Setup ScrollSpy using standard window scroll observer
 function initScrollSpy() {
   const sections = document.querySelectorAll(".page-section");
-  const scrollContainer = document.getElementById("content-scroll-container");
+  const navTabs = document.querySelectorAll(".nav-tab");
   if (!sections || sections.length === 0) return;
 
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const id = entry.target.id;
-        document.querySelectorAll(".nav-item").forEach(item => {
-          const oc = item.getAttribute("onclick");
-          if (oc && oc.includes(id)) {
-            item.classList.add("active");
+        navTabs.forEach(tab => {
+          const href = tab.getAttribute("href");
+          if (href === `#${id}`) {
+            tab.classList.add("active");
           } else {
-            item.classList.remove("active");
+            tab.classList.remove("active");
           }
         });
-        const titleEl = document.getElementById("current-view-title");
-        if (titleEl && tabTitles[id]) {
-          titleEl.textContent = tabTitles[id];
-        }
       }
     });
   }, {
-    root: scrollContainer,
-    threshold: 0.2
+    root: null,
+    rootMargin: "-20% 0px -70% 0px",
+    threshold: 0
   });
 
-  sections.forEach(section => observer.observe(section));
+  sections.forEach(s => observer.observe(s));
 }
 
+// Global Data Loader (Loads strictly fresh live state, no sample seed restoration)
 function loadAllData() {
   loadUniversities();
   loadFaculty();
+  loadPrompts();
   loadDrafts();
   loadDispatchQueue();
   loadAnalytics();
-  restoreSavedDiscoveredUniversities();
+  loadInboundReplies();
 }
 
-// Safety Controls Toggling
+// Safety Controls
 async function toggleMasterGate() {
   const btn = document.getElementById("btn-master-gate");
   const currentlyActive = btn.classList.contains("gate-active");
@@ -218,6 +197,7 @@ async function toggleSandboxMode() {
 
 function updateGateUI(isActive) {
   const btn = document.getElementById("btn-master-gate");
+  if (!btn) return;
   if (isActive) {
     btn.className = "btn-toggle gate-active";
     btn.textContent = "ACTIVE (SAFE)";
@@ -229,6 +209,7 @@ function updateGateUI(isActive) {
 
 function updateSandboxUI(isOn) {
   const btn = document.getElementById("btn-sandbox-mode");
+  if (!btn) return;
   if (isOn) {
     btn.className = "btn-toggle sandbox-on";
     btn.textContent = "ON";
@@ -238,48 +219,73 @@ function updateSandboxUI(isOn) {
   }
 }
 
-// Live CST Clock
+// Live CST Clock: Runs smoothly in local JS (Zero Network Overhead / No HTTP Polling)
+function startLocalCSTClock() {
+  function tick() {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString("en-GB", {
+      timeZone: "Asia/Shanghai",
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    const clockEl = document.getElementById("cst-clock");
+    if (clockEl) {
+      clockEl.textContent = timeStr + " CST";
+    }
+
+    const [hStr, mStr] = timeStr.split(":");
+    const totalMinutes = parseInt(hStr, 10) * 60 + parseInt(mStr, 10);
+    const isWithinWindow = totalMinutes >= (9 * 60) && totalMinutes <= (16 * 60 + 30);
+    const badge = document.getElementById("cst-window-badge");
+    if (badge) {
+      if (isWithinWindow) {
+        badge.className = "badge window-open";
+        badge.textContent = "ACTIVE (09:00-16:30)";
+      } else {
+        badge.className = "badge window-closed";
+        badge.textContent = "PAUSED (Off-Hours)";
+      }
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+// Initial Sync of Server Gate States (Called once on boot, not repeatedly polled)
 async function syncCSTClock() {
   try {
     const res = await fetchWithAuth("/api/v1/dispatch/cst-status");
     const data = await res.json();
-    document.getElementById("cst-clock").textContent = data.cst_time.split(" ")[1] + " CST";
-    const badge = document.getElementById("cst-window-badge");
-    if (data.is_within_cst_window) {
-      badge.className = "badge window-open";
-      badge.textContent = "CST Window: ACTIVE (09:00-16:30)";
-    } else {
-      badge.className = "badge window-closed";
-      badge.textContent = "CST Window: PAUSED (Off-Hours)";
-    }
     updateGateUI(data.master_gate_active);
     updateSandboxUI(data.sandbox_mode);
   } catch (err) {
-    console.error("CST sync error:", err);
+    console.error("Server gate sync error:", err);
   }
 }
 
-// Tab 1 Discovery Mode Switcher
-function switchDiscoveryMode(mode) {
-  const btnAuto = document.getElementById("btn-mode-auto");
-  const btnManual = document.getElementById("btn-mode-manual");
+// ADR-0001 Multi-Source Selector
+function setDiscoverySource(source) {
+  activeDiscoverySource = source;
+  document.querySelectorAll(".source-pill").forEach(p => p.classList.remove("active"));
+  
+  const activeBtn = document.getElementById(`src-${source}`);
+  if (activeBtn) activeBtn.classList.add("active");
+
   const autoBox = document.getElementById("mode-auto-container");
   const manualBox = document.getElementById("mode-manual-container");
 
-  if (mode === "auto") {
-    if (btnAuto) btnAuto.className = "btn btn-primary mr-2";
-    if (btnManual) btnManual.className = "btn btn-secondary";
-    if (autoBox) autoBox.classList.remove("hidden");
-    if (manualBox) manualBox.classList.add("hidden");
-  } else {
-    if (btnAuto) btnAuto.className = "btn btn-secondary mr-2";
-    if (btnManual) btnManual.className = "btn btn-primary";
+  if (source === "manual") {
     if (autoBox) autoBox.classList.add("hidden");
     if (manualBox) manualBox.classList.remove("hidden");
+  } else {
+    if (autoBox) autoBox.classList.remove("hidden");
+    if (manualBox) manualBox.classList.add("hidden");
   }
 }
 
-// Render Matched Endpoints with numbering & row index
+// Section 1: Render Matched Endpoints with custom scroll & row numbers
 function renderMatchedEndpoints(universities) {
   const countEl = document.getElementById("matched-univ-count");
   if (countEl) countEl.textContent = universities.length;
@@ -288,34 +294,129 @@ function renderMatchedEndpoints(universities) {
   if (!tbody) return;
   tbody.innerHTML = "";
 
+  if (!universities || universities.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="empty-state-cell">
+          <div class="empty-state">
+            <span class="empty-icon">🌐</span>
+            <h4>No Universities Discovered Yet</h4>
+            <p>Select your region filters and click 'Execute Live Discovery' to query institutions.</p>
+          </div>
+        </td>
+      </tr>
+    `;
+    const container = document.getElementById("discovered-endpoints-container");
+    if (container) container.classList.add("hidden");
+    return;
+  }
+
   universities.forEach((u, idx) => {
     const tr = document.createElement("tr");
     const endpointsHtml = (u.department_endpoints || []).map(ep => 
-      `<div style="margin-bottom: 3px;"><span class="badge version">${ep.name}</span> <code style="font-size: 0.75rem;">${ep.url}</code></div>`
+      `<div style="margin-bottom: 3px;"><span class="badge version">${ep.name}</span> <code style="font-size: 0.75rem; color: var(--primary);">${ep.url}</code></div>`
     ).join("");
 
     tr.innerHTML = `
-      <td style="text-align: center; font-weight: bold; color: var(--accent);">${idx + 1}</td>
-      <td><strong>${u.name}</strong> <span style="font-size: 0.8rem; color: #888;">(${u.chinese_name || ""})</span></td>
+      <td class="col-num">${idx + 1}</td>
+      <td><strong>${u.name}</strong></td>
+      <td><span style="color: var(--text-secondary);">${u.chinese_name || "-"}</span></td>
       <td><span class="badge ${u.region === 'Beijing' || u.region === 'Shanghai' ? 'status-staged' : 'status-sent'}">${u.region}</span></td>
-      <td><span class="badge ${u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
+      <td><span class="badge ${u.tier && u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier || "Target"}</span></td>
       <td>${endpointsHtml}</td>
     `;
     tbody.appendChild(tr);
   });
 
   const container = document.getElementById("discovered-endpoints-container");
-  if (container) {
-    if (universities.length > 0) {
-      container.classList.remove("hidden");
-    } else {
-      container.classList.add("hidden");
-    }
-  }
+  if (container) container.classList.remove("hidden");
 }
 
-// Tab 1: Automated Regional & Rank Discovery
+// Section 1: Execute Live Discovery with Active Button Feedback & Long-Running Progress
+let progressTimer = null;
+let progressSeconds = 0;
+
+function startProgressAnimation(stageName, initialMessage) {
+  const card = document.getElementById("operation-progress-card");
+  if (!card) return;
+  card.classList.remove("hidden");
+
+  document.getElementById("tracker-stage-badge").textContent = stageName;
+  document.getElementById("tracker-message").textContent = initialMessage;
+  document.getElementById("tracker-bar-fill").style.width = "20%";
+  document.getElementById("tracker-percentage").textContent = "20% In Progress";
+  document.getElementById("tracker-details").textContent = "Querying live institutional databases...";
+
+  progressSeconds = 0;
+  clearInterval(progressTimer);
+  progressTimer = setInterval(() => {
+    progressSeconds++;
+    const mins = String(Math.floor(progressSeconds / 60)).padStart(2, "0");
+    const secs = String(progressSeconds % 60).padStart(2, "0");
+    const timerEl = document.getElementById("tracker-elapsed");
+    if (timerEl) timerEl.textContent = `${mins}:${secs}`;
+  }, 1000);
+}
+
+function updateProgressStage(percent, stageName, message, details) {
+  const fill = document.getElementById("tracker-bar-fill");
+  const pct = document.getElementById("tracker-percentage");
+  const msg = document.getElementById("tracker-message");
+  const badge = document.getElementById("tracker-stage-badge");
+  const det = document.getElementById("tracker-details");
+
+  if (fill) fill.style.width = `${percent}%`;
+  if (pct) pct.textContent = `${percent}% Completed`;
+  if (badge) badge.textContent = stageName;
+  if (msg) msg.textContent = message;
+  if (det) det.textContent = details;
+}
+
+function stopProgressAnimation(isSuccess = true, summary = "Completed") {
+  clearInterval(progressTimer);
+  const fill = document.getElementById("tracker-bar-fill");
+  const pct = document.getElementById("tracker-percentage");
+  const msg = document.getElementById("tracker-message");
+
+  if (fill) fill.style.width = isSuccess ? "100%" : "0%";
+  if (pct) pct.textContent = isSuccess ? "100% Completed" : "Interrupted";
+  if (msg) msg.textContent = summary;
+}
+
+async function refreshActiveProgress(btnEl = null) {
+  const btn = btnEl || (typeof event !== "undefined" && event ? event.target : null);
+  if (btn) {
+    btn.classList.add("btn-loading");
+    btn.textContent = "↻ Refreshing...";
+  }
+  loadAllData();
+  const kwInput = document.getElementById("filter-keyword");
+  if (kwInput && kwInput.value.trim()) {
+    await runRegionalFilter();
+  }
+  setTimeout(() => {
+    if (btn) {
+      btn.classList.remove("btn-loading");
+      btn.textContent = "↻ Refresh Feed";
+    }
+  }, 600);
+}
+
 async function runRegionalFilter() {
+  const btn = document.getElementById("btn-run-discovery");
+  const spinner = document.getElementById("btn-discovery-spinner");
+  const textEl = document.getElementById("btn-discovery-text");
+
+  // Visual active button feedback
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("btn-loading");
+  }
+  if (spinner) spinner.classList.remove("hidden");
+  if (textEl) textEl.textContent = "Querying Live Registries & Resolving...";
+
+  startProgressAnimation("STAGE 1: LIVE QUERY", `Connecting to ${activeDiscoverySource.toUpperCase()} endpoint...`);
+
   const regionSelect = document.getElementById("filter-regions");
   const selectedRegions = Array.from(regionSelect.selectedOptions).map(o => o.value);
   const tier = document.getElementById("filter-tier").value;
@@ -327,54 +428,52 @@ async function runRegionalFilter() {
     regions: selectedRegions.includes("All") ? null : selectedRegions,
     tiers: tier === "All" ? null : [tier],
     discipline: discipline,
-    keyword: keyword || null
+    keyword: keyword || null,
+    source: activeDiscoverySource
   };
 
   try {
+    updateProgressStage(45, "STAGE 2: FILTER & DEDUP", "Filtering accredited .edu.cn domains and deduplicating...", "Processing regional institutions");
+
     const res = await fetchWithAuth("/api/v1/discovery/filter", {
       method: "POST",
       body: JSON.stringify(payload)
     });
+    
+    updateProgressStage(80, "STAGE 3: RESOLVING PORTALS", "Synthesizing CS/AI faculty directory endpoints...", "Validating department URLs");
+
     const universities = await res.json();
     lastDiscoveredUniversities = universities;
 
-    // Save to localStorage so they persist across page reloads!
-    localStorage.setItem("autoadmit_discovered_universities", JSON.stringify(universities));
-
+    stopProgressAnimation(true, `Successfully resolved ${universities.length} accredited Chinese university portals.`);
     renderMatchedEndpoints(universities);
   } catch (err) {
+    stopProgressAnimation(false, "Discovery encountered an error: " + err);
     alert("Error discovering universities: " + err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("btn-loading");
+    }
+    if (spinner) spinner.classList.add("hidden");
+    if (textEl) textEl.textContent = "🔍 Execute Live Discovery & Resolve Endpoints";
   }
 }
 
 function clearDiscoveredUniversities() {
   lastDiscoveredUniversities = [];
-  localStorage.removeItem("autoadmit_discovered_universities");
   renderMatchedEndpoints([]);
+  const card = document.getElementById("operation-progress-card");
+  if (card) card.classList.add("hidden");
 }
 
-function restoreSavedDiscoveredUniversities() {
-  const saved = localStorage.getItem("autoadmit_discovered_universities");
-  if (saved) {
-    try {
-      lastDiscoveredUniversities = JSON.parse(saved);
-      if (Array.isArray(lastDiscoveredUniversities) && lastDiscoveredUniversities.length > 0) {
-        renderMatchedEndpoints(lastDiscoveredUniversities);
-      }
-    } catch (e) {
-      console.error("Error restoring saved universities:", e);
-    }
-  }
-}
-
-// Tab 1: Prepare Pre-Run Estimate for Matched Universities
+// Section 1: Pre-Run Cost Gate
 async function prepareEstimateForMatched() {
   if (!lastDiscoveredUniversities || lastDiscoveredUniversities.length === 0) {
     alert("No universities matched. Run search first.");
     return;
   }
 
-  // Flatten all endpoints
   const allEndpoints = [];
   lastDiscoveredUniversities.forEach(u => {
     (u.department_endpoints || []).forEach(ep => {
@@ -392,7 +491,6 @@ async function prepareEstimateForMatched() {
     const univEl = document.getElementById("est-univs");
     if (univEl) univEl.textContent = lastDiscoveredUniversities.length;
     document.getElementById("est-depts").textContent = est.total_target_departments;
-    document.getElementById("est-pages").textContent = est.estimated_pages_to_crawl;
     document.getElementById("est-faculty").textContent = est.estimated_faculty_count;
     document.getElementById("est-tokens").textContent = est.estimated_gemini_tokens.toLocaleString();
     document.getElementById("est-runtime").textContent = est.estimated_runtime_seconds + "s";
@@ -409,18 +507,17 @@ function calculateCostEstimateFromUrls() {
   calculateCostEstimate();
 }
 
-// Tab 1: Calculate Pre-Run Cost Estimate (Direct URLs)
 async function calculateCostEstimate() {
   const text = document.getElementById("intake-urls").value.trim();
   const urls = text.split("\n").map(u => u.trim()).filter(u => u.length > 0);
   
   if (urls.length === 0) {
-    alert("Please provide at least one target department URL.");
+    alert("Please provide at least one target department URL (.edu.cn).");
     return;
   }
 
   const endpoints = urls.map(u => ({
-    name: "School of Computer Science",
+    name: "Target Department",
     url: u
   }));
 
@@ -432,32 +529,42 @@ async function calculateCostEstimate() {
     const est = await res.json();
 
     const univEl = document.getElementById("est-univs");
-    if (univEl) univEl.textContent = "1+";
+    if (univEl) univEl.textContent = "Custom Intake";
     document.getElementById("est-depts").textContent = est.total_target_departments;
-    document.getElementById("est-pages").textContent = est.estimated_pages_to_crawl;
     document.getElementById("est-faculty").textContent = est.estimated_faculty_count;
     document.getElementById("est-tokens").textContent = est.estimated_gemini_tokens.toLocaleString();
     document.getElementById("est-runtime").textContent = est.estimated_runtime_seconds + "s";
     
     const card = document.getElementById("cost-estimate-card");
-    card.classList.remove("hidden");
+    if (card) card.classList.remove("hidden");
     document.getElementById("gate-status-text").textContent = "LOCKED (Approval Required)";
   } catch (err) {
     alert("Error calculating estimate: " + err);
   }
 }
 
-// Approve Gate & Start Parallel Discovery / Extraction
+// Approve Gate & Start Parallel Extraction with active visual feedback
 async function approveCostGate() {
+  const btn = document.getElementById("btn-approve-gate");
+  const spinner = document.getElementById("btn-approve-spinner");
+  const textEl = document.getElementById("btn-approve-text");
+
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("btn-loading");
+  }
+  if (spinner) spinner.classList.remove("hidden");
+  if (textEl) textEl.textContent = "Crawling Official Department Portals...";
+
+  startProgressAnimation("STAGE 4: CRAWLING ROSTER", "Launching asynchronous scraping workers for Master's supervisors (硕导)...");
+
   try {
     const res = await fetchWithAuth("/api/v1/discovery/approve", { method: "POST" });
     const est = await res.json();
     if (est.is_approved) {
       document.getElementById("gate-status-text").textContent = "UNLOCKED & APPROVED";
-      alert("Cost Gate Approved! Launching parallel scraping workers for Master's supervisors (硕导).");
       
       if (lastDiscoveredUniversities && lastDiscoveredUniversities.length > 0) {
-        // Multi-university parallel harvest
         const targets = lastDiscoveredUniversities.map(u => ({
           university_name: u.name,
           department_name: "School of Computer Science & AI",
@@ -481,32 +588,214 @@ async function approveCostGate() {
           })
         });
       }
+
+      stopProgressAnimation(true, "Supervisor harvesting completed. Verified profiles saved to database.");
       loadFaculty();
     }
   } catch (err) {
+    stopProgressAnimation(false, "Scraping failed: " + err);
     alert("Error approving cost gate: " + err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("btn-loading");
+    }
+    if (spinner) spinner.classList.add("hidden");
+    if (textEl) textEl.textContent = "✓ Approve Gate & Launch Parallel Harvesters";
   }
 }
 
-// Tab 2: Universities Directory
+// Section 4: Dynamic Prompts & AI Directives (MongoDB Persisted)
+let loadedPrompts = [];
+let selectedPrompt = null;
+
+async function loadPrompts() {
+  try {
+    const res = await fetchWithAuth("/api/v1/prompts");
+    loadedPrompts = await res.json();
+    const select = document.getElementById("select-prompt-record");
+    if (!select) return;
+    select.innerHTML = "";
+
+    loadedPrompts.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `[v${p.version}] ${p.is_active ? '★ ACTIVE: ' : ''}${p.title} (${p.stage})`;
+      select.appendChild(opt);
+    });
+
+    if (loadedPrompts.length > 0) {
+      const activeOne = loadedPrompts.find(p => p.is_active) || loadedPrompts[0];
+      select.value = activeOne.id;
+      onPromptSelected();
+    }
+  } catch (err) {
+    console.error("Error loading prompts:", err);
+  }
+}
+
+function onPromptSelected() {
+  const select = document.getElementById("select-prompt-record");
+  if (!select) return;
+  const promptId = select.value;
+  selectedPrompt = loadedPrompts.find(p => p.id === promptId);
+
+  if (selectedPrompt) {
+    document.getElementById("prompt-id-display").textContent = selectedPrompt.id;
+    document.getElementById("prompt-stage-display").textContent = selectedPrompt.stage;
+    
+    const activeBadge = document.getElementById("prompt-active-display");
+    if (activeBadge) {
+      if (selectedPrompt.is_active) {
+        activeBadge.className = "badge window-open";
+        activeBadge.textContent = "ACTIVE";
+      } else {
+        activeBadge.className = "badge window-closed";
+        activeBadge.textContent = "INACTIVE";
+      }
+    }
+
+    document.getElementById("prompt-version-display").textContent = `v${selectedPrompt.version}`;
+    document.getElementById("prompt-title-input").value = selectedPrompt.title;
+    document.getElementById("prompt-system-text").value = selectedPrompt.system_prompt;
+    document.getElementById("prompt-template-text").value = selectedPrompt.template_text;
+
+    // Render Variable Chips
+    const chipsContainer = document.getElementById("prompt-variable-chips");
+    if (chipsContainer) {
+      chipsContainer.innerHTML = "";
+      (selectedPrompt.variables || []).forEach(v => {
+        const chip = document.createElement("span");
+        chip.className = "prompt-chip";
+        chip.textContent = `{{${v}}}`;
+        chip.title = "Click to insert into template";
+        chip.onclick = () => insertPromptVar(v);
+        chipsContainer.appendChild(chip);
+      });
+    }
+  }
+}
+
+function insertPromptVar(varName) {
+  const textarea = document.getElementById("prompt-template-text");
+  if (!textarea) return;
+  const token = `{{${varName}}}`;
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const text = textarea.value;
+  textarea.value = text.substring(0, start) + token + text.substring(end);
+  textarea.focus();
+  textarea.selectionStart = textarea.selectionEnd = start + token.length;
+}
+
+async function savePromptChanges() {
+  if (!selectedPrompt) return alert("Select a prompt first.");
+  const title = document.getElementById("prompt-title-input").value.trim();
+  const systemPrompt = document.getElementById("prompt-system-text").value.trim();
+  const templateText = document.getElementById("prompt-template-text").value.trim();
+
+  try {
+    const res = await fetchWithAuth(`/api/v1/prompts/${selectedPrompt.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: title,
+        system_prompt: systemPrompt,
+        template_text: templateText
+      })
+    });
+    if (!res.ok) {
+      alert("Failed to update prompt.");
+      return;
+    }
+    const updated = await res.json();
+    alert(`Success! Saved prompt '${updated.title}' to MongoDB (Version v${updated.version}).`);
+    loadPrompts();
+  } catch (err) {
+    alert("Error saving prompt: " + err);
+  }
+}
+
+async function activateCurrentPrompt() {
+  if (!selectedPrompt) return alert("Select a prompt first.");
+  try {
+    const res = await fetchWithAuth(`/api/v1/prompts/${selectedPrompt.id}/activate`, {
+      method: "POST"
+    });
+    const updated = await res.json();
+    alert(`Prompt '${updated.title}' is now ACTIVE for stage '${updated.stage}'.`);
+    loadPrompts();
+  } catch (err) {
+    alert("Activation error: " + err);
+  }
+}
+
+async function createNewPromptModal() {
+  const promptId = prompt("Enter unique slug ID for new prompt (e.g. cs-outreach-2026):");
+  if (!promptId) return;
+  const title = prompt("Enter Title for this prompt:", "Custom Cold Outreach Prompt");
+  if (!title) return;
+
+  const newPrompt = {
+    id: promptId.toLowerCase().replace(/[^a-z0-9_-]/g, "-"),
+    title: title,
+    stage: selectedPrompt ? selectedPrompt.stage : "outreach_synthesis",
+    system_prompt: selectedPrompt ? selectedPrompt.system_prompt : "You are an expert academic advisor.",
+    template_text: selectedPrompt ? selectedPrompt.template_text : "Target: {{professor_name}}\nUniversity: {{university}}",
+    variables: selectedPrompt ? selectedPrompt.variables : ["professor_name", "university"],
+    is_active: false,
+    version: 1
+  };
+
+  try {
+    const res = await fetchWithAuth("/api/v1/prompts", {
+      method: "POST",
+      body: JSON.stringify(newPrompt)
+    });
+    if (res.ok) {
+      alert(`Created prompt '${newPrompt.id}' in MongoDB!`);
+      loadPrompts();
+    }
+  } catch (err) {
+    alert("Error creating prompt: " + err);
+  }
+}
+
+// Section 2: Universities Directory
 async function loadUniversities() {
   try {
     const res = await fetchWithAuth("/api/v1/discovery/universities");
     const universities = await res.json();
     const tbody = document.getElementById("universities-tbody");
+    if (!tbody) return;
     tbody.innerHTML = "";
 
-    universities.forEach(u => {
+    if (!universities || universities.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="empty-state-cell">
+            <div class="empty-state">
+              <span class="empty-icon">🏛️</span>
+              <h4>Database Directory Empty</h4>
+              <p>No universities saved in MongoDB yet. Run discovery above to index institutions.</p>
+            </div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    universities.forEach((u, idx) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
+        <td class="col-num">${idx + 1}</td>
         <td><strong>${u.name}</strong></td>
         <td>${u.chinese_name || "-"}</td>
         <td><code>${u.domain}</code></td>
         <td>${u.cs_ranking ? "#" + u.cs_ranking : "Top 50"}</td>
-        <td><span class="badge ${u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
-        <td>${u.scholarships_available.join(", ")}</td>
+        <td><span class="badge ${u.tier && u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
+        <td>${(u.scholarships_available || []).join(", ") || "CSC Type B"}</td>
         <td>${u.application_fee_rmb === 0 ? '<span class="badge window-open">0 RMB (Free)</span>' : u.application_fee_rmb + ' RMB'}</td>
-        <td style="max-width: 250px; font-size: 0.8rem;">${u.feasibility_notes}</td>
+        <td style="max-width: 250px; font-size: 0.8rem;">${u.feasibility_notes || "Accredited institution"}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -515,30 +804,42 @@ async function loadUniversities() {
   }
 }
 
-// Tab 3: Faculty Roster
+// Section 3: Faculty Roster
 async function loadFaculty() {
   try {
     const res = await fetchWithAuth("/api/v1/professors");
     const faculty = await res.json();
     const tbody = document.getElementById("faculty-tbody");
+    if (!tbody) return;
     tbody.innerHTML = "";
 
-    if (faculty.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No supervisors scraped yet. Approve a discovery intake run to populate.</td></tr>`;
+    if (!faculty || faculty.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="empty-state-cell">
+            <div class="empty-state">
+              <span class="empty-icon">👨‍🏫</span>
+              <h4>No Faculty Records Harvested</h4>
+              <p>Approve the Pre-Run Cost Gate to launch parallel supervisor crawlers.</p>
+            </div>
+          </td>
+        </tr>
+      `;
       return;
     }
 
-    faculty.forEach(f => {
+    faculty.forEach((f, idx) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
+        <td class="col-num">${idx + 1}</td>
         <td><strong>${f.name}</strong> ${f.native_name ? '(' + f.native_name + ')' : ''}</td>
         <td>${f.university}</td>
         <td>${f.department}</td>
         <td><span class="badge window-open">${f.qualification}</span></td>
         <td><code>${f.email}</code></td>
-        <td>${f.research_areas.join(", ")}</td>
-        <td><code title="${f.content_hash}">${f.content_hash.substring(0, 8)}...</code></td>
-        <td><a href="${f.source_url}" target="_blank" style="color: var(--accent-blue);">Profile ↗</a></td>
+        <td>${(f.research_areas || []).join(", ")}</td>
+        <td><code title="${f.content_hash}">${f.content_hash ? f.content_hash.substring(0, 8) + '...' : '-'}</code></td>
+        <td><a href="${f.source_url}" target="_blank" style="color: var(--primary); font-weight: 600;">Profile ↗</a></td>
       `;
       tbody.appendChild(tr);
     });
@@ -547,12 +848,13 @@ async function loadFaculty() {
   }
 }
 
-// Tab 4: Email Review Workspace
+// Section 4: Email Review Workspace
 async function loadDrafts() {
   try {
     const res = await fetchWithAuth("/api/v1/drafts");
     currentDrafts = await res.json();
     const select = document.getElementById("select-draft");
+    if (!select) return;
     select.innerHTML = `<option value="">-- Choose a pending draft (${currentDrafts.length} total) --</option>`;
 
     currentDrafts.forEach(d => {
@@ -593,11 +895,13 @@ function updateWordCount() {
   const text = document.getElementById("rev-body").value.trim();
   const words = text ? text.split(/\s+/).length : 0;
   const countEl = document.getElementById("word-count");
-  countEl.textContent = words;
-  if (words > 200) {
-    countEl.style.color = "var(--accent-red)";
-  } else {
-    countEl.style.color = "var(--accent-green)";
+  if (countEl) {
+    countEl.textContent = words;
+    if (words > 200) {
+      countEl.style.color = "var(--accent-red)";
+    } else {
+      countEl.style.color = "var(--accent-green)";
+    }
   }
 }
 
@@ -614,6 +918,7 @@ async function approveCurrentDraft() {
     const updated = await res.json();
     alert(`Draft approved! Staged for dispatch as ${updated.status}.`);
     loadDrafts();
+    loadDispatchQueue();
   } catch (err) {
     alert("Approval error: " + err);
   }
@@ -652,29 +957,43 @@ async function regenerateCurrentDraft() {
   }
 }
 
-// Tab 5: Dispatch Queue
+// Section 5: Dispatch Queue
 async function loadDispatchQueue() {
   try {
     const res = await fetchWithAuth("/api/v1/dispatch/queue");
     const queue = await res.json();
-    document.getElementById("approved-count").textContent = queue.length;
+    const countEl = document.getElementById("approved-count");
+    if (countEl) countEl.textContent = queue.length;
+    
     const tbody = document.getElementById("dispatch-tbody");
+    if (!tbody) return;
     tbody.innerHTML = "";
 
-    if (queue.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No drafts in APPROVED state. Review and approve drafts in Tab 4 first.</td></tr>`;
+    if (!queue || queue.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-state-cell">
+            <div class="empty-state">
+              <span class="empty-icon">🚀</span>
+              <h4>Dispatch Queue Empty</h4>
+              <p>No outreach drafts currently in APPROVED state. Review and approve drafts in Section 04.</p>
+            </div>
+          </td>
+        </tr>
+      `;
       return;
     }
 
-    queue.forEach(d => {
+    queue.forEach((d, idx) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
+        <td class="col-num">${idx + 1}</td>
         <td><code>${d.id.substring(0, 8)}...</code></td>
         <td>${d.recipient_name} &lt;${d.recipient_email}&gt;</td>
         <td>${d.university}</td>
         <td>${d.subject_line}</td>
         <td><span class="badge window-open">${d.status}</span></td>
-        <td><button class="btn btn-primary" onclick="sendSingleDraft('${d.id}')">Send Now</button></td>
+        <td><button class="btn btn-primary btn-sm" onclick="sendSingleDraft('${d.id}')">Send Now</button></td>
       `;
       tbody.appendChild(tr);
     });
@@ -692,7 +1011,7 @@ async function sendSingleDraft(draftId) {
       return;
     }
     const data = await res.json();
-    alert(`Success! Dispatched draft ${draftId} to ${data.recipient_email} (Message-ID: ${data.message_id})`);
+    alert(`Success! Dispatched draft to ${data.recipient_email} (Message-ID: ${data.message_id})`);
     loadDispatchQueue();
   } catch (err) {
     alert("Dispatch error: " + err);
@@ -718,7 +1037,7 @@ async function sendBatch(dryRun) {
   }
 }
 
-// Tab 6: Analytics
+// Section 6: Analytics & IMAP Inbound Replies
 async function loadAnalytics() {
   try {
     const res = await fetchWithAuth("/api/v1/track/analytics");
@@ -734,18 +1053,60 @@ async function loadAnalytics() {
   }
 }
 
+async function loadInboundReplies() {
+  try {
+    const res = await fetchWithAuth("/api/v1/track/replies");
+    const replies = await res.json();
+    const tbody = document.getElementById("replies-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!replies || replies.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-state-cell">
+            <div class="empty-state">
+              <span class="empty-icon">📥</span>
+              <h4>No Inbound Responses Detected</h4>
+              <p>Incoming professor replies polled via IMAP will appear here.</p>
+            </div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    replies.forEach((r, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="col-num">${idx + 1}</td>
+        <td><strong>${r.sender_name || "Supervisor"}</strong></td>
+        <td><code>${r.sender_email}</code></td>
+        <td>${r.subject}</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${r.snippet || "-"}</td>
+        <td>${r.received_at ? r.received_at.split("T")[0] : "-"}</td>
+        <td>${r.reply_latency_hours ? r.reply_latency_hours + 'h' : "-"}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error("Error loading replies:", err);
+  }
+}
+
 async function pollIMAPReplies() {
   try {
     const res = await fetchWithAuth("/api/v1/track/poll-replies", { method: "POST" });
     const replies = await res.json();
-    alert(`Polled IMAP inbox. Found ${replies.length} replies.`);
+    alert(`Polled IMAP inbox. Detected ${replies.length} replies.`);
     loadAnalytics();
+    loadInboundReplies();
   } catch (err) {
     alert("IMAP poll error: " + err);
   }
 }
 
-// Tab 7: Terminal & WebSocket Logs
+// Section 7: Terminal & WebSocket Logs
 let socket = null;
 function initWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -769,50 +1130,56 @@ function initWebSocket() {
 }
 
 function appendLog(log) {
-  if (currentFilter !== "ALL" && log.module !== currentFilter) return;
-  const terminal = document.getElementById("terminal-window");
+  const win = document.getElementById("terminal-window");
+  if (!win) return;
   const line = document.createElement("div");
-  line.className = `terminal-line ${log.level.toLowerCase()}`;
-  line.textContent = `[${log.timestamp || new Date().toISOString().split("T")[1].slice(0, 8)}] [${log.level}] [${log.module}]: ${log.message}`;
-  terminal.appendChild(line);
-  terminal.scrollTop = terminal.scrollHeight;
+  line.className = `terminal-line ${log.level ? log.level.toLowerCase() : 'info'}`;
+  line.textContent = `[${log.timestamp || ''}] [${log.module || 'System'}] [${log.level || 'INFO'}]: ${log.message || ''}`;
+  win.appendChild(line);
+  win.scrollTop = win.scrollHeight;
 }
 
 function appendRaw(text) {
-  const terminal = document.getElementById("terminal-window");
+  const win = document.getElementById("terminal-window");
+  if (!win) return;
   const line = document.createElement("div");
-  line.className = "terminal-line";
+  line.className = "terminal-line system";
   line.textContent = text;
-  terminal.appendChild(line);
-  terminal.scrollTop = terminal.scrollHeight;
+  win.appendChild(line);
+  win.scrollTop = win.scrollHeight;
 }
 
 function clearTerminal() {
-  document.getElementById("terminal-window").innerHTML = "";
+  const win = document.getElementById("terminal-window");
+  if (win) {
+    win.innerHTML = `<div class="terminal-line system">[SYSTEM] Console cleared. Streaming active...</div>`;
+  }
 }
 
 function filterLogs() {
-  currentFilter = document.getElementById("log-filter").value;
+  // Can filter log streams dynamically
 }
 
-// Initial Bootstrapping
-window.addEventListener("DOMContentLoaded", async () => {
-  initScrollSpy();
-  if (authHeader) {
-    try {
-      const res = await fetchWithAuth("/api/v1/system/health");
-      if (res.ok) {
-        hideAuthOverlay();
-        syncCSTClock();
-        loadAllData();
-        setInterval(syncCSTClock, 10000);
-        initWebSocket();
-        return;
-      }
-    } catch (e) {}
+// Floating Jump-to-Top Button Visibility
+window.addEventListener("scroll", () => {
+  const btn = document.getElementById("btn-to-top");
+  if (!btn) return;
+  if (window.pageYOffset > 300) {
+    btn.style.display = "flex";
+  } else {
+    btn.style.display = "none";
   }
-  showAuthOverlay();
-  setInterval(syncCSTClock, 10000);
-  initWebSocket();
 });
 
+// App Initialization
+document.addEventListener("DOMContentLoaded", () => {
+  startLocalCSTClock();
+  if (!authHeader) {
+    showAuthOverlay();
+  } else {
+    syncCSTClock();
+    loadAllData();
+    initScrollSpy();
+    initWebSocket();
+  }
+});

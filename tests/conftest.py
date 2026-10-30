@@ -29,7 +29,7 @@ def isolate_test_database():
         db_manager.db = db_manager.client["autoadmit_test"]
     yield
     # Cleanup test database so zero mock/test data remains
-    if db_manager.client is not None:
+    if db_manager.is_connected and db_manager.client is not None:
         try:
             import asyncio
             loop = asyncio.get_event_loop()
