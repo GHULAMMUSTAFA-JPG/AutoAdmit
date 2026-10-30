@@ -125,22 +125,20 @@ class GeminiSynthesisAgent:
         - Status: Locked to PENDING_REVIEW.
         """
         prompt = (
-            f"Write a professional, high-conversion academic outreach email from a prospective international graduate applicant "
+            f"Write a professional, concise academic outreach email from a prospective international graduate applicant "
             f"to Professor {profile.name} at {profile.university}.\n\n"
             f"Faculty Research Digest: {research_digest}\n"
             f"Target University: {profile.university}\n\n"
             f"Strict Constraints:\n"
             f"1. Length: MUST be under 200 words total.\n"
-            f"2. Practical Alignment: Highlight hands-on technical and engineering capabilities (Python, PyTorch, Agentic AI, "
-            f"biometrics, deployed systems). NEVER mention GPA, grades, or cutoffs.\n"
-            f"3. Scholarship Objective: State your goal to apply for Master's graduate studies under their supervision, "
-            f"seeking their academic support/acceptance for the Chinese Government Scholarship (CSC Type B) or University Scholarship.\n"
+            f"2. Practical Alignment: Connect applicant's technical background with the professor's research topics. NEVER mention GPA, grades, or cutoffs.\n"
+            f"3. Scholarship Objective: State your goal to apply for competitive graduate scholarships (CSC, ANSO, Presidential, or Belt & Road) and pursue Master's research under their supervision.\n"
             f"4. Format output as:\n"
             f"SUBJECT: [Compelling custom subject line]\n"
             f"BODY: [Email body under 200 words]\n"
         )
 
-        subject = f"Prospective Master's Student - Research Alignment in {profile.research_areas[0] if profile.research_areas else 'AI Systems'}"
+        subject = f"Prospective Master's Student - Research Alignment in {profile.research_areas[0] if profile.research_areas else 'Computer Science'}"
         body = ""
 
         gemini_text = self._call_gemini(prompt)
@@ -153,16 +151,14 @@ class GeminiSynthesisAgent:
                 body = gemini_text
 
         if not body:
-            primary_topic = profile.research_areas[0] if profile.research_areas else "AI Systems"
-            subject = f"Prospective CSC Master's Student - {primary_topic} Research Alignment"
+            primary_topic = profile.research_areas[0] if profile.research_areas else "Computer Science"
+            subject = f"Prospective Master's Student - {primary_topic} Research Alignment"
             body = (
                 f"Dear Professor {profile.name},\n\n"
                 f"I have closely reviewed your laboratory's work at {profile.university} regarding {primary_topic}. "
-                f"Your research focus on empirical architectures and scalable deep learning systems strongly aligns with my technical background.\n\n"
-                f"As an applied developer with hands-on experience building PyTorch pipelines, Agentic AI systems, and "
-                f"biometric verification models, I am eager to contribute to your ongoing research as a Master's student.\n\n"
-                f"I intend to apply for the Chinese Government Scholarship (CSC Type B) and would be deeply honored to pursue "
-                f"my graduate research under your supervision.\n\n"
+                f"Your research focus and published literature strongly align with my academic interests and technical background.\n\n"
+                f"With hands-on experience in software development and applied machine learning systems, I am eager to contribute to your ongoing research as a Master's student.\n\n"
+                f"I am preparing applications for fully funded graduate scholarships (such as CSC / University fellowships) and would be deeply honored to pursue my research under your supervision.\n\n"
                 f"Would you be open to reviewing my attached CV or available for a brief introductory conversation?\n\n"
                 f"Thank you for your time and guidance.\n\n"
                 f"Sincerely,\n"

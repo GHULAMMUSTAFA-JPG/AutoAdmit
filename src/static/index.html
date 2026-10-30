@@ -132,10 +132,10 @@
 
         <!-- Mode A: Automated Discovery by Region & Rank -->
         <div id="mode-auto-container" class="discovery-mode-box">
-          <div class="grid-3">
+          <div class="grid-2">
             <div class="form-group">
               <label for="filter-regions">Target Regions (Provinces / Cities):</label>
-              <select id="filter-regions" class="form-control" multiple size="5">
+              <select id="filter-regions" class="form-control" multiple size="7">
                 <option value="All" selected>All Major Regions</option>
                 <option value="Beijing">Beijing (Peking, Tsinghua, Beihang, BJTU)</option>
                 <option value="Shanghai">Shanghai (SJTU, Fudan)</option>
@@ -151,9 +151,9 @@
             </div>
 
             <div class="form-group">
-              <label for="filter-tier">Feasibility Tier & Competitiveness:</label>
+              <label for="filter-tier">Institutional Tier / Competitiveness:</label>
               <select id="filter-tier" class="form-control">
-                <option value="All">All Tiers (Dream + Target + Safety)</option>
+                <option value="All">All Tiers (Project 985, 211, Provincial Key)</option>
                 <option value="Tier 1 (Dream)">Tier 1: Dream (Top C9 & Project 985)</option>
                 <option value="Tier 2 (Target)">Tier 2: Target (Project 211 & Key Engineering)</option>
                 <option value="Tier 3 (Safety)">Tier 3: Safety (High Quota / Accessible)</option>
@@ -165,17 +165,8 @@
                 <option value="Artificial Intelligence">Artificial Intelligence & Robotics</option>
                 <option value="Software Engineering">Software Engineering</option>
               </select>
-            </div>
 
-            <div class="form-group">
-              <label>Applicant Academic Objective:</label>
-              <div class="profile-card">
-                <div class="profile-item"><strong>Target Degree:</strong> Master's in CS / AI</div>
-                <div class="profile-item"><strong>Faculty Target:</strong> Master's Supervisors (硕士生导师 / 硕导)</div>
-                <div class="profile-item"><strong>Technical Strengths:</strong> PyTorch, Agentic AI, Biometrics, Deployed Systems</div>
-                <div class="profile-item"><strong>Scholarship Goal:</strong> CSC Type B / University Presidential Scholarship</div>
-              </div>
-              <button class="btn btn-primary btn-block mt-2" onclick="runRegionalFilter()">Search Universities & Resolve Portals</button>
+              <button class="btn btn-primary btn-block mt-3" onclick="runRegionalFilter()">Search Universities & Resolve Portals</button>
             </div>
           </div>
         </div>
@@ -231,7 +222,7 @@
             <div class="metric-box">
               <span class="label">Est. Gemini Tokens</span>
               <span id="est-tokens" class="val">0</span>
-              <span class="hint" style="font-size: 0.72rem; color: #4fc3f7; display: block; margin-top: 4px;">(Crawling is $0 / 0 tokens; Tokens used ONLY for downstream drafts)</span>
+              <span class="hint" style="font-size: 0.7rem;">(Only for digests & drafts)</span>
             </div>
             <div class="metric-box">
               <span class="label">Est. Runtime</span>
