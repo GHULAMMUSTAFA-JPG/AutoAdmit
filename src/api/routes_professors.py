@@ -62,10 +62,9 @@ async def list_professors(
         async for doc in cursor:
             doc.pop("_id", None)
             results.append(FacultyProfile(**doc))
-        if results:
-            return results
+        return results
 
-    # Fallback to in-memory cache
+    # Fallback to in-memory cache when MongoDB is offline
     results = list(professors_cache.values())
     if university:
         results = [p for p in results if university.lower() in p.university.lower()]

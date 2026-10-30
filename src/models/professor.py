@@ -40,6 +40,8 @@ class FacultyProfile(BaseModel):
     source_url: str = Field(..., description="Direct official faculty profile URL")
     content_hash: str = Field(..., description="SHA-256 cryptographic hash of raw extracted HTML")
     worker_id: str = Field(..., description="Worker process ID for audit lineage")
+    is_seed: bool = Field(default=False, description="True for benchmark seed data; False for live internet-scraped records")
+    data_source: str = Field(default="live_crawled", description="Source marker: 'live_crawled' or 'benchmark_seed'")
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     extraction_status: ExtractionStatus = Field(default=ExtractionStatus.VERIFIED)
 

@@ -250,6 +250,8 @@ class FacultyHarvester:
             source_url=source_url,
             content_hash=content_hash,
             worker_id=self.worker_id,
+            is_seed=False,
+            data_source="live_crawled",
             extraction_status=ExtractionStatus.VERIFIED
         )
 

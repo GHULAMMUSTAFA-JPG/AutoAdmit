@@ -38,6 +38,8 @@ class University(BaseModel):
     application_fee_rmb: int = Field(default=0, description="Application fee in RMB (0 if free)")
     feasibility_notes: str = Field(default="", description="GPA compensation notes and outreach focus")
     department_endpoints: List[DepartmentEndpoint] = Field(default_factory=list)
+    is_seed: bool = Field(default=False, description="True for benchmark seed data; False for live internet-scraped records")
+    data_source: str = Field(default="live_crawled", description="Source marker: 'live_crawled' or 'benchmark_seed'")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
