@@ -77,6 +77,7 @@ async function submitPasswordLogin() {
       hideAuthOverlay();
       syncCSTClock();
       loadUniversities();
+      restoreSavedDiscoveredUniversities();
     } else {
       if (errEl) {
         errEl.textContent = "Invalid password. Access denied.";
@@ -241,17 +242,55 @@ function switchDiscoveryMode(mode) {
   }
 }
 
+// Render Matched Endpoints with numbering & row index
+function renderMatchedEndpoints(universities) {
+  const countEl = document.getElementById("matched-univ-count");
+  if (countEl) countEl.textContent = universities.length;
+
+  const tbody = document.getElementById("matched-endpoints-tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  universities.forEach((u, idx) => {
+    const tr = document.createElement("tr");
+    const endpointsHtml = (u.department_endpoints || []).map(ep => 
+      `<div style="margin-bottom: 3px;"><span class="badge version">${ep.name}</span> <code style="font-size: 0.75rem;">${ep.url}</code></div>`
+    ).join("");
+
+    tr.innerHTML = `
+      <td style="text-align: center; font-weight: bold; color: var(--accent);">${idx + 1}</td>
+      <td><strong>${u.name}</strong> <span style="font-size: 0.8rem; color: #888;">(${u.chinese_name || ""})</span></td>
+      <td><span class="badge ${u.region === 'Beijing' || u.region === 'Shanghai' ? 'status-staged' : 'status-sent'}">${u.region}</span></td>
+      <td><span class="badge ${u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
+      <td>${endpointsHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const container = document.getElementById("discovered-endpoints-container");
+  if (container) {
+    if (universities.length > 0) {
+      container.classList.remove("hidden");
+    } else {
+      container.classList.add("hidden");
+    }
+  }
+}
+
 // Tab 1: Automated Regional & Rank Discovery
 async function runRegionalFilter() {
   const regionSelect = document.getElementById("filter-regions");
   const selectedRegions = Array.from(regionSelect.selectedOptions).map(o => o.value);
   const tier = document.getElementById("filter-tier").value;
   const discipline = document.getElementById("filter-discipline").value;
+  const keywordInput = document.getElementById("filter-keyword");
+  const keyword = keywordInput ? keywordInput.value.trim() : null;
 
   const payload = {
     regions: selectedRegions.includes("All") ? null : selectedRegions,
     tiers: tier === "All" ? null : [tier],
-    discipline: discipline
+    discipline: discipline,
+    keyword: keyword || null
   };
 
   try {
@@ -262,31 +301,32 @@ async function runRegionalFilter() {
     const universities = await res.json();
     lastDiscoveredUniversities = universities;
 
-    const countEl = document.getElementById("matched-univ-count");
-    if (countEl) countEl.textContent = universities.length;
+    // Save to localStorage so they persist across page reloads!
+    localStorage.setItem("autoadmit_discovered_universities", JSON.stringify(universities));
 
-    const tbody = document.getElementById("matched-endpoints-tbody");
-    tbody.innerHTML = "";
-
-    universities.forEach(u => {
-      const tr = document.createElement("tr");
-      const endpointsHtml = (u.department_endpoints || []).map(ep => 
-        `<div style="margin-bottom: 3px;"><span class="badge version">${ep.name}</span> <code style="font-size: 0.75rem;">${ep.url}</code></div>`
-      ).join("");
-
-      tr.innerHTML = `
-        <td><strong>${u.name}</strong> <span style="font-size: 0.8rem; color: #888;">(${u.chinese_name || ""})</span></td>
-        <td><span class="badge ${u.region === 'Beijing' || u.region === 'Shanghai' ? 'status-staged' : 'status-sent'}">${u.region}</span></td>
-        <td><span class="badge ${u.tier.includes('Dream') ? 'warning' : 'version'}">${u.tier}</span></td>
-        <td>${endpointsHtml}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-
-    const container = document.getElementById("discovered-endpoints-container");
-    if (container) container.classList.remove("hidden");
+    renderMatchedEndpoints(universities);
   } catch (err) {
     alert("Error discovering universities: " + err);
+  }
+}
+
+function clearDiscoveredUniversities() {
+  lastDiscoveredUniversities = [];
+  localStorage.removeItem("autoadmit_discovered_universities");
+  renderMatchedEndpoints([]);
+}
+
+function restoreSavedDiscoveredUniversities() {
+  const saved = localStorage.getItem("autoadmit_discovered_universities");
+  if (saved) {
+    try {
+      lastDiscoveredUniversities = JSON.parse(saved);
+      if (Array.isArray(lastDiscoveredUniversities) && lastDiscoveredUniversities.length > 0) {
+        renderMatchedEndpoints(lastDiscoveredUniversities);
+      }
+    } catch (e) {
+      console.error("Error restoring saved universities:", e);
+    }
   }
 }
 
@@ -720,6 +760,7 @@ function filterLogs() {
 
 // Initial Bootstrapping
 window.addEventListener("DOMContentLoaded", async () => {
+  restoreSavedDiscoveredUniversities();
   if (authHeader) {
     try {
       const res = await fetchWithAuth("/api/v1/system/health");

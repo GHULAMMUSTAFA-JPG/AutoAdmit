@@ -1,5 +1,7 @@
 """University Discovery, Feasibility Scoring (2.68 CGPA Compensation), and Pre-Run Cost Gate."""
 
+import json
+import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from src.core.logger import setup_logger
@@ -14,189 +16,57 @@ from src.models.university import (
 logger = setup_logger("DiscoveryService")
 
 
+def _load_universities_catalog() -> Dict[str, Dict]:
+    catalog_path = os.path.join(os.path.dirname(__file__), "..", "data", "chinese_universities.json")
+    if os.path.exists(catalog_path):
+        try:
+            with open(catalog_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                result = {}
+                for domain, meta in data.items():
+                    tier_str = meta.get("tier", "Tier 3 (Safety)")
+                    if "Dream" in tier_str or "Tier 1" in tier_str:
+                        tier_enum = FeasibilityTier.TIER_1_DREAM
+                    elif "Target" in tier_str or "Tier 2" in tier_str:
+                        tier_enum = FeasibilityTier.TIER_2_TARGET
+                    else:
+                        tier_enum = FeasibilityTier.TIER_3_SAFETY
+
+                    raw_scholars = meta.get("scholarships", [])
+                    scholars = []
+                    for s in raw_scholars:
+                        if "CSC" in s:
+                            scholars.append(ScholarshipType.CSC_TYPE_B)
+                        elif "President" in s or "Fellowship" in s:
+                            scholars.append(ScholarshipType.PRESIDENTIAL)
+                        elif "Belt" in s or "Silk" in s:
+                            scholars.append(ScholarshipType.BELT_AND_ROAD)
+                        elif "Provincial" in s or "Jasmine" in s or "Government" in s or "Mayor" in s or "SGS" in s:
+                            scholars.append(ScholarshipType.PROVINCIAL)
+                    if not scholars:
+                        scholars = [ScholarshipType.CSC_TYPE_B]
+
+                    result[domain] = {
+                        "name": meta["name"],
+                        "chinese_name": meta.get("chinese_name"),
+                        "region": meta.get("region", "National"),
+                        "tier": tier_enum,
+                        "cs_ranking": meta.get("cs_ranking"),
+                        "is_project_985": meta.get("is_project_985", False),
+                        "is_project_211": meta.get("is_project_211", False),
+                        "application_fee_rmb": meta.get("application_fee_rmb", 0),
+                        "scholarships": scholars,
+                        "feasibility_notes": meta.get("feasibility_notes", "")
+                    }
+                logger.info(f"Loaded {len(result)} accredited Chinese universities from national catalog.")
+                return result
+        except Exception as e:
+            logger.error(f"Error loading universities catalog JSON: {e}")
+    return {}
+
+
 # Knowledge base of Chinese Universities with scholarship, region, and barrier metadata
-KNOWN_UNIVERSITIES_METADATA: Dict[str, Dict] = {
-    "tsinghua.edu.cn": {
-        "name": "Tsinghua University",
-        "chinese_name": "清华大学",
-        "region": "Beijing",
-        "tier": FeasibilityTier.TIER_1_DREAM,
-        "cs_ranking": 1,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. Strict academic cutoffs. Focus outreach toward early-career faculty / Associate Professors and new engineering labs requiring hands-on output."
-    },
-    "pku.edu.cn": {
-        "name": "Peking University",
-        "chinese_name": "北京大学",
-        "region": "Beijing",
-        "tier": FeasibilityTier.TIER_1_DREAM,
-        "cs_ranking": 2,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. Focus on Key State Labs in AI and software engineering."
-    },
-    "zju.edu.cn": {
-        "name": "Zhejiang University",
-        "chinese_name": "浙江大学",
-        "region": "Zhejiang",
-        "tier": FeasibilityTier.TIER_1_DREAM,
-        "cs_ranking": 3,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. College of Computer Science & Technology labs working on vision and robotics."
-    },
-    "sjtu.edu.cn": {
-        "name": "Shanghai Jiao Tong University",
-        "chinese_name": "上海交通大学",
-        "region": "Shanghai",
-        "tier": FeasibilityTier.TIER_1_DREAM,
-        "cs_ranking": 4,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL],
-        "feasibility_notes": "Tier 1 Dream. Direct outreach to AI Institute engineering labs."
-    },
-    "fudan.edu.cn": {
-        "name": "Fudan University",
-        "chinese_name": "复旦大学",
-        "region": "Shanghai",
-        "tier": FeasibilityTier.TIER_1_DREAM,
-        "cs_ranking": 5,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 1 Dream. School of Computer Science research groups in NLP and systems."
-    },
-    "buaa.edu.cn": {
-        "name": "Beihang University",
-        "chinese_name": "北京航空航天大学",
-        "region": "Beijing",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 8,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 400,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Project 985/211 engineering powerhouse. Receptive to biometric systems and applied ML pipelines."
-    },
-    "hit.edu.cn": {
-        "name": "Harbin Institute of Technology",
-        "chinese_name": "哈尔滨工业大学",
-        "region": "Heilongjiang",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 9,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 400,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Outstanding CS faculty with high quota for research scholars in NLP and automation."
-    },
-    "xidian.edu.cn": {
-        "name": "Xidian University",
-        "chinese_name": "西安电子科技大学",
-        "region": "Shaanxi",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 12,
-        "is_project_985": False,
-        "is_project_211": True,
-        "application_fee_rmb": 0,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.BELT_AND_ROAD],
-        "feasibility_notes": "Tier 2 Target. Project 211 National Key. Zero application fee barrier. Strong alignment with AI & signals."
-    },
-    "xjtu.edu.cn": {
-        "name": "Xi'an Jiaotong University",
-        "chinese_name": "西安交通大学",
-        "region": "Shaanxi",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 10,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. C9 League institution with large AI research institute."
-    },
-    "hust.edu.cn": {
-        "name": "Huazhong Univ. of Science and Technology",
-        "chinese_name": "华中科技大学",
-        "region": "Hubei",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 7,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 600,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Project 985 top engineering hub in central China."
-    },
-    "uestc.edu.cn": {
-        "name": "Univ. of Electronic Science & Tech of China",
-        "chinese_name": "电子科技大学",
-        "region": "Sichuan",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 11,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 420,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Outstanding CS/AI research facilities and high quota for international researchers."
-    },
-    "sysu.edu.cn": {
-        "name": "Sun Yat-sen University",
-        "chinese_name": "中山大学",
-        "region": "Guangdong",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 13,
-        "is_project_985": True,
-        "is_project_211": True,
-        "application_fee_rmb": 800,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Top southern comprehensive university with major AI School in Shenzhen campus."
-    },
-    "bjtu.edu.cn": {
-        "name": "Beijing Jiaotong University",
-        "chinese_name": "北京交通大学",
-        "region": "Beijing",
-        "tier": FeasibilityTier.TIER_2_TARGET,
-        "cs_ranking": 15,
-        "is_project_985": False,
-        "is_project_211": True,
-        "application_fee_rmb": 500,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 2 Target. Project 211 engineering hub. Evaluates candidates on technical portfolio."
-    },
-    "nuist.edu.cn": {
-        "name": "Nanjing Univ. of Information Science & Tech",
-        "chinese_name": "南京信息工程大学",
-        "region": "Jiangsu",
-        "tier": FeasibilityTier.TIER_3_SAFETY,
-        "cs_ranking": 35,
-        "is_project_985": False,
-        "is_project_211": False,
-        "application_fee_rmb": 0,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 3 Safety. High international graduate quotas and full scholarship grants (Jasmine / CSC). High admission probability."
-    },
-    "jiangnan.edu.cn": {
-        "name": "Jiangnan University",
-        "chinese_name": "江南大学",
-        "region": "Jiangsu",
-        "tier": FeasibilityTier.TIER_3_SAFETY,
-        "cs_ranking": 42,
-        "is_project_985": False,
-        "is_project_211": True,
-        "application_fee_rmb": 0,
-        "scholarships": [ScholarshipType.CSC_TYPE_B, ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL],
-        "feasibility_notes": "Tier 3 Safety. Project 211 with accessible admission minimums, 0 application fee, and high acceptance of external CSC candidates."
-    }
-}
+KNOWN_UNIVERSITIES_METADATA: Dict[str, Dict] = _load_universities_catalog()
 
 
 class DiscoveryEngine:
@@ -253,9 +123,10 @@ class DiscoveryEngine:
         self,
         regions: Optional[List[str]] = None,
         tiers: Optional[List[str]] = None,
-        max_rank: Optional[int] = None
+        max_rank: Optional[int] = None,
+        keyword: Optional[str] = None
     ) -> List[University]:
-        """Filters Chinese universities dynamically by Region, Tier/Feasibility, and Rank."""
+        """Filters Chinese universities dynamically by Region, Tier/Feasibility, Rank, and Keyword."""
         results = []
         for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
             univ = self.assess_university(domain)
@@ -267,6 +138,16 @@ class DiscoveryEngine:
                     continue
             if max_rank and univ.cs_ranking and univ.cs_ranking > max_rank:
                 continue
+            if keyword:
+                kw = keyword.lower().strip()
+                matches = (
+                    kw in univ.name.lower() or
+                    (univ.chinese_name and kw in univ.chinese_name.lower()) or
+                    kw in univ.domain.lower() or
+                    kw in univ.region.lower()
+                )
+                if not matches:
+                    continue
             results.append(univ)
         return results
 

@@ -33,6 +33,7 @@ class FilterUniversitiesRequest(BaseModel):
     tiers: Optional[List[str]] = None
     max_rank: Optional[int] = None
     discipline: str = "Computer Science"
+    keyword: Optional[str] = None
 
 
 @router.post("/filter", response_model=List[University])
@@ -41,7 +42,8 @@ def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str =
     matched = discovery_engine.filter_universities(
         regions=request.regions,
         tiers=request.tiers,
-        max_rank=request.max_rank
+        max_rank=request.max_rank,
+        keyword=request.keyword
     )
     for u in matched:
         u.department_endpoints = discovery_engine.discover_department_endpoints(u, request.discipline)

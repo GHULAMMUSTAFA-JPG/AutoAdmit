@@ -135,17 +135,32 @@
           <div class="grid-2">
             <div class="form-group">
               <label for="filter-regions">Target Regions (Provinces / Cities):</label>
-              <select id="filter-regions" class="form-control" multiple size="7">
-                <option value="All" selected>All Major Regions</option>
-                <option value="Beijing">Beijing (Peking, Tsinghua, Beihang, BJTU)</option>
-                <option value="Shanghai">Shanghai (SJTU, Fudan)</option>
-                <option value="Jiangsu">Jiangsu (Nanjing, NUIST, Jiangnan)</option>
-                <option value="Zhejiang">Zhejiang (ZJU)</option>
-                <option value="Shaanxi">Shaanxi (Xi'an Jiaotong, Xidian)</option>
-                <option value="Hubei">Hubei (HUST, Wuhan Univ.)</option>
-                <option value="Guangdong">Guangdong (Sun Yat-sen, SCUT)</option>
-                <option value="Sichuan">Sichuan (UESTC, Sichuan Univ.)</option>
-                <option value="Heilongjiang">Heilongjiang (HIT)</option>
+              <select id="filter-regions" class="form-control" multiple size="8">
+                <option value="All" selected>All Major Regions (National Catalog)</option>
+                <option value="Beijing">Beijing (Peking, Tsinghua, Beihang, BUPT, BIT, RUC, UCAS)</option>
+                <option value="Shanghai">Shanghai (SJTU, Fudan, Tongji, ECNU, ShanghaiTech, SHU)</option>
+                <option value="Jiangsu">Jiangsu (Nanjing Univ, Southeast, NUAA, NUST, NUIST, Jiangnan)</option>
+                <option value="Zhejiang">Zhejiang (ZJU, Hangzhou Dianzi, Ningbo)</option>
+                <option value="Guangdong">Guangdong (Sun Yat-sen, SCUT, Shenzhen Univ, SUSTech, GDUT)</option>
+                <option value="Shaanxi">Shaanxi (Xi'an Jiaotong, Xidian, NWPU, Northwest Univ, Chang'an)</option>
+                <option value="Hubei">Hubei (HUST, Wuhan Univ, Wuhan Tech, CUG)</option>
+                <option value="Sichuan">Sichuan (UESTC, Sichuan Univ, Southwest Jiaotong)</option>
+                <option value="Chongqing">Chongqing (Chongqing Univ, CQUPT)</option>
+                <option value="Heilongjiang">Heilongjiang (Harbin Inst of Tech, Harbin Engineering)</option>
+                <option value="Jilin">Jilin (Jilin University)</option>
+                <option value="Liaoning">Liaoning (Dalian Tech, Northeastern Univ)</option>
+                <option value="Anhui">Anhui (USTC, Hefei Tech, Anhui Univ)</option>
+                <option value="Shandong">Shandong (Shandong Univ, Ocean Univ, Petroleum)</option>
+                <option value="Hunan">Hunan (Central South, Hunan Univ)</option>
+                <option value="Fujian">Fujian (Xiamen Univ, Fuzhou Univ)</option>
+                <option value="Tianjin">Tianjin (Nankai Univ, Tianjin Univ)</option>
+                <option value="Henan">Henan (Zhengzhou University)</option>
+                <option value="Jiangxi">Jiangxi (Nanchang University)</option>
+                <option value="Gansu">Gansu (Lanzhou University)</option>
+                <option value="Guangxi">Guangxi (Guilin Electronic Tech, Guangxi Univ)</option>
+                <option value="Yunnan">Yunnan (Yunnan University)</option>
+                <option value="Shanxi">Shanxi (Taiyuan Tech)</option>
+                <option value="Xinjiang">Xinjiang (Xinjiang University)</option>
               </select>
               <span class="hint">Hold Ctrl to select multiple regions</span>
             </div>
@@ -166,6 +181,9 @@
                 <option value="Software Engineering">Software Engineering</option>
               </select>
 
+              <label for="filter-keyword" class="mt-2">Search University Name, Native Chinese, or Domain:</label>
+              <input type="text" id="filter-keyword" class="form-control" placeholder="e.g. BUPT, 邮电, Shenzhen, Dianzi, CAS, zju.edu.cn...">
+
               <button class="btn btn-primary btn-block mt-3" onclick="runRegionalFilter()">Search Universities & Resolve Portals</button>
             </div>
           </div>
@@ -185,12 +203,16 @@
         <div id="discovered-endpoints-container" class="mt-3 hidden">
           <div class="flex-between">
             <h3>Discovered University Portals (<span id="matched-univ-count">0</span> Universities Resolved)</h3>
-            <button class="btn btn-success" onclick="prepareEstimateForMatched()">Proceed to Cost Gate</button>
+            <div>
+              <button class="btn btn-secondary mr-2" onclick="clearDiscoveredUniversities()">Clear Results</button>
+              <button class="btn btn-success" onclick="prepareEstimateForMatched()">Proceed to Cost Gate</button>
+            </div>
           </div>
           <div class="table-responsive mt-2">
             <table class="data-table">
               <thead>
                 <tr>
+                  <th style="width: 50px; text-align: center;">#</th>
                   <th>University</th>
                   <th>Region</th>
                   <th>Tier</th>
