@@ -50,9 +50,39 @@ def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str =
     return matched
 
 
+from src.core.database import db_manager
+
+
 @router.get("/universities", response_model=List[University])
-def get_universities_directory(user: str = Depends(get_current_user)):
-    """Returns directory of known universities with scholarship metadata and feasibility tiers."""
+async def get_universities_directory(user: str = Depends(get_current_user)):
+    """Returns directory of known universities from MongoDB database."""
+    if db_manager.is_connected and db_manager.db is not None:
+        cursor = db_manager.get_collection("universities").find({})
+        results = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            results.append(University(**doc))
+        if results:
+            return results
+
+        # If collection is currently empty, initialize MongoDB with accredited catalog records
+        catalog_results = []
+        for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
+            univ = discovery_engine.assess_university(domain)
+            univ.is_seed = True
+            univ.data_source = "benchmark_seed"
+            catalog_results.append(univ)
+            try:
+                await db_manager.get_collection("universities").update_one(
+                    {"domain": univ.domain},
+                    {"$set": univ.model_dump()},
+                    upsert=True
+                )
+            except Exception:
+                pass
+        return catalog_results
+
+    # Offline fallback
     results = []
     for domain, meta in KNOWN_UNIVERSITIES_METADATA.items():
         univ = discovery_engine.assess_university(domain)

@@ -76,8 +76,8 @@ async function submitPasswordLogin() {
       localStorage.setItem("autoadmit_auth", authHeader);
       hideAuthOverlay();
       syncCSTClock();
-      loadUniversities();
-      restoreSavedDiscoveredUniversities();
+      loadAllData();
+      initScrollSpy();
     } else {
       if (errEl) {
         errEl.textContent = "Invalid password. Access denied.";
@@ -98,7 +98,7 @@ function lockSession() {
   showAuthOverlay();
 }
 
-// Tab Titles Mapping
+// Tab Titles Mapping for One Big Page Flow
 const tabTitles = {
   "tab-setup": "1. Campaign Setup & Resource Estimation",
   "tab-universities": "2. University Feasibility & Scholarship Directory",
@@ -109,39 +109,76 @@ const tabTitles = {
   "tab-terminal": "7. System Terminal & Live Log Streaming"
 };
 
-// Tab Switching
-function switchTab(tabId, clickedBtn = null) {
-  document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
-  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-  document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
+// Section Scrolling (One Big Page Flow)
+function switchTab(sectionId, clickedBtn = null) {
+  scrollToSection(sectionId, clickedBtn);
+}
 
-  const target = document.getElementById(tabId);
-  if (target) target.classList.add("active");
-
-  const titleEl = document.getElementById("current-view-title");
-  if (titleEl && tabTitles[tabId]) {
-    titleEl.textContent = tabTitles[tabId];
+function scrollToSection(sectionId, clickedBtn = null) {
+  const target = document.getElementById(sectionId);
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // Highlight active button
-  const btn = clickedBtn || (typeof event !== "undefined" && event ? event.target.closest(".nav-item, .tab-btn") : null);
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+  const btn = clickedBtn || (typeof event !== "undefined" && event ? event.target.closest(".nav-item") : null);
   if (btn) {
     btn.classList.add("active");
   } else {
     document.querySelectorAll(".nav-item").forEach(item => {
       const oc = item.getAttribute("onclick");
-      if (oc && oc.includes(tabId)) {
+      if (oc && oc.includes(sectionId)) {
         item.classList.add("active");
       }
     });
   }
 
-  // Load relevant data on tab open
-  if (tabId === "tab-universities") loadUniversities();
-  if (tabId === "tab-faculty") loadFaculty();
-  if (tabId === "tab-review") loadDrafts();
-  if (tabId === "tab-dispatch") loadDispatchQueue();
-  if (tabId === "tab-analytics") loadAnalytics();
+  const titleEl = document.getElementById("current-view-title");
+  if (titleEl && tabTitles[sectionId]) {
+    titleEl.textContent = tabTitles[sectionId];
+  }
+}
+
+// Setup ScrollSpy / IntersectionObserver to highlight sidebar as user scrolls
+function initScrollSpy() {
+  const sections = document.querySelectorAll(".page-section");
+  const scrollContainer = document.getElementById("content-scroll-container");
+  if (!sections || sections.length === 0) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        document.querySelectorAll(".nav-item").forEach(item => {
+          const oc = item.getAttribute("onclick");
+          if (oc && oc.includes(id)) {
+            item.classList.add("active");
+          } else {
+            item.classList.remove("active");
+          }
+        });
+        const titleEl = document.getElementById("current-view-title");
+        if (titleEl && tabTitles[id]) {
+          titleEl.textContent = tabTitles[id];
+        }
+      }
+    });
+  }, {
+    root: scrollContainer,
+    threshold: 0.2
+  });
+
+  sections.forEach(section => observer.observe(section));
+}
+
+function loadAllData() {
+  loadUniversities();
+  loadFaculty();
+  loadDrafts();
+  loadDispatchQueue();
+  loadAnalytics();
+  restoreSavedDiscoveredUniversities();
 }
 
 // Safety Controls Toggling
@@ -760,13 +797,14 @@ function filterLogs() {
 
 // Initial Bootstrapping
 window.addEventListener("DOMContentLoaded", async () => {
-  restoreSavedDiscoveredUniversities();
+  initScrollSpy();
   if (authHeader) {
     try {
       const res = await fetchWithAuth("/api/v1/system/health");
       if (res.ok) {
         hideAuthOverlay();
         syncCSTClock();
+        loadAllData();
         setInterval(syncCSTClock, 10000);
         initWebSocket();
         return;

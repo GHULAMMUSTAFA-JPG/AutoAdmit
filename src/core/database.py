@@ -74,6 +74,15 @@ class DatabaseManager:
                 IndexModel([("in_reply_to", ASCENDING)])
             ])
 
+            # 4. Universities collection indexes
+            universities = self.db["universities"]
+            await universities.create_indexes([
+                IndexModel([("domain", ASCENDING)], unique=True),
+                IndexModel([("region", ASCENDING)]),
+                IndexModel([("tier", ASCENDING)]),
+                IndexModel([("is_seed", ASCENDING)])
+            ])
+
             logger.info("MongoDB deduplication and operational indexes successfully verified.")
         except Exception as e:
             logger.error(f"Error creating MongoDB indexes: {e}")

@@ -12,6 +12,33 @@ settings.SANDBOX_MODE = True
 settings.TEST_RECIPIENT_EMAIL = "applicant.test@example.com"
 settings.BASIC_AUTH_USERNAME = "admin"
 settings.BASIC_AUTH_PASSWORD = "autoadmit_secure_pass_2026"
+settings.DB_NAME = "autoadmit_test"
+
+from src.core.database import db_manager
+db_manager.db_name = "autoadmit_test"
+if db_manager.client is not None:
+    db_manager.db = db_manager.client["autoadmit_test"]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolate_test_database():
+    """Ensures test suite operates strictly in isolated test database and cleans up afterward."""
+    settings.DB_NAME = "autoadmit_test"
+    db_manager.db_name = "autoadmit_test"
+    if db_manager.client is not None:
+        db_manager.db = db_manager.client["autoadmit_test"]
+    yield
+    # Cleanup test database so zero mock/test data remains
+    if db_manager.client is not None:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(db_manager.client.drop_database("autoadmit_test"))
+            else:
+                loop.run_until_complete(db_manager.client.drop_database("autoadmit_test"))
+        except Exception:
+            pass
 
 
 @pytest.fixture

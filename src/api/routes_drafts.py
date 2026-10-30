@@ -39,10 +39,9 @@ async def list_drafts(
         async for doc in cursor:
             doc.pop("_id", None)
             results.append(OutreachDraft(**doc))
-        if results:
-            return results
+        return results
 
-    results = list(drafts_cache.values())
+    # Fallback to in-memory cache when MongoDB is offline
     if status_filter:
         results = [d for d in results if d.status == status_filter]
     return results

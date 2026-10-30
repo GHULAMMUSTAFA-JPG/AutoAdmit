@@ -51,8 +51,7 @@ async def get_dispatch_queue(user: str = Depends(get_current_user)):
         async for doc in cursor:
             doc.pop("_id", None)
             results.append(OutreachDraft(**doc))
-        if results:
-            return results
+        return results
 
     return [d for d in drafts_cache.values() if d.status == DraftStatus.APPROVED]
 
