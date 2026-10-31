@@ -23,6 +23,8 @@ class ScholarshipType(str, Enum):
 class DepartmentEndpoint(BaseModel):
     name: str = Field(..., description="Department or School name as published on the university site")
     url: str = Field(..., description="Verified faculty directory URL on an official .edu.cn domain")
+    is_verified: bool = Field(default=False, description="True only when confirmed via live homepage/HTTP check")
+    status: str = Field(default="Pending Verification", description="Verification state of this endpoint")
 
 
 class University(BaseModel):
@@ -40,9 +42,11 @@ class University(BaseModel):
     is_double_first_class: bool = Field(default=False)
     scholarships_available: List[ScholarshipType] = Field(default_factory=list)
     application_fee_rmb: Optional[int] = Field(default=None, description="Unknown unless scraped; never assumed")
+    fee_note: str = Field(default="400–800 RMB (Standard Est.)", description="Realistic application fee guidance")
     feasibility_notes: str = Field(default="")
+    pipeline_status: str = Field(default="Pending Live Check", description="Current discovery/extraction status")
     department_endpoints: List[DepartmentEndpoint] = Field(default_factory=list)
-    website_verified: bool = Field(default=False, description="Official site fetched & confirmed on .edu.cn")
+    website_verified: bool = Field(default=False, description="True only when official site is live-fetched & confirmed")
     verified_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     is_seed: bool = Field(default=False)

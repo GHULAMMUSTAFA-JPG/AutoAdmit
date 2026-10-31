@@ -256,84 +256,106 @@
             </div>
           </div>
 
-          <!-- Discovered Universities Table Container (With Scrollbar & Row Numbers) -->
+          <!-- Discovered Universities Table & Live Logs Toggle Container -->
           <div id="discovered-endpoints-container" class="results-container mt-4 hidden">
             <div class="table-action-header">
               <div class="header-meta">
                 <h3>Discovered University Portals (<span id="matched-univ-count" class="highlight-count">0</span> Institutions)</h3>
-                <span class="table-subtitle">Official verified portals ready for supervisor extraction</span>
+                <span class="table-subtitle">Homepage-First Discovery: Verified university roots & resolved department directories</span>
               </div>
               <div class="action-buttons">
-                <button class="btn btn-secondary btn-sm" onclick="clearDiscoveredUniversities()">Clear Results</button>
-                <button class="btn btn-secondary btn-sm" onclick="runRegionalFilter()">↻ Refresh Discovery</button>
-                <button class="btn btn-success btn-sm" onclick="prepareEstimateForMatched()">Proceed to Cost Gate ➔</button>
+                <div class="view-toggle-group">
+                  <button id="btn-view-portals-table" class="btn-view-toggle active" onclick="switchPortalsView('table')">📊 Data Table</button>
+                  <button id="btn-view-portals-logs" class="btn-view-toggle" onclick="switchPortalsView('logs')">📜 Live Extraction Logs (<span id="live-log-counter">0</span>)</button>
+                </div>
+                <button id="btn-resolve-depts" class="btn btn-primary btn-sm btn-interactive" onclick="resolveRealDepartmentsForVisible(this)" title="Crawls verified homepages (院系设置) to find real CS/AI department & supervisor URLs">🧭 Resolve Real Dept Links</button>
+                <button class="btn btn-secondary btn-sm btn-interactive" onclick="runRegionalFilter(this)">↻ Refresh</button>
+                <button class="btn btn-secondary btn-sm btn-interactive" onclick="clearDiscoveredUniversities()">Clear</button>
+                <button class="btn btn-success btn-sm btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Step 03: Harvest Supervisors ➔</button>
               </div>
             </div>
 
-            <!-- Custom Scrollable Table Container -->
-            <div class="table-scroll-container">
-              <table class="enterprise-table">
-                <thead>
-                  <tr>
-                    <th class="col-num">#</th>
-                    <th>University Name</th>
-                    <th>Native Name</th>
-                    <th>Region</th>
-                    <th>Institutional Tier</th>
-                    <th>Resolved CS/AI Department Endpoints</th>
-                  </tr>
-                </thead>
-                <tbody id="matched-endpoints-tbody">
-                  <!-- Dynamically populated -->
-                </tbody>
-              </table>
+            <!-- Live Filter & Sort Toolbar for Table 1 -->
+            <div id="portals-filter-toolbar" class="table-toolbar">
+              <div class="toolbar-item toolbar-search">
+                <input type="text" id="portal-search-input" class="form-control form-control-sm" placeholder="🔎 Filter table by university name, Chinese name, or domain..." oninput="applyPortalsTableFilter()" />
+              </div>
+              <div class="toolbar-item">
+                <select id="portal-region-filter" class="form-control form-control-sm" onchange="applyPortalsTableFilter()">
+                  <option value="All">All Regions</option>
+                </select>
+              </div>
+              <div class="toolbar-item">
+                <select id="portal-tier-filter" class="form-control form-control-sm" onchange="applyPortalsTableFilter()">
+                  <option value="All">All Tiers</option>
+                  <option value="Tier 1 (Dream)">Tier 1 (Dream - 985)</option>
+                  <option value="Tier 2 (Target)">Tier 2 (Target - 211)</option>
+                  <option value="Tier 3 (Safety)">Tier 3 (Safety)</option>
+                </select>
+              </div>
+              <div class="toolbar-item">
+                <select id="portal-sort-select" class="form-control form-control-sm" onchange="applyPortalsTableFilter()">
+                  <option value="region-asc" selected>Sort: Region (A → Z)</option>
+                  <option value="region-desc">Sort: Region (Z → A)</option>
+                  <option value="tier-asc">Sort: Tier (Dream → Safety)</option>
+                  <option value="name-asc">Sort: University Name (A → Z)</option>
+                  <option value="status-asc">Sort: Pipeline Status</option>
+                </select>
+              </div>
+              <div class="toolbar-item">
+                <select id="portal-limit-select" class="form-control form-control-sm" onchange="onTableLimitChange('portals', this.value)" title="Number of rows shown in table">
+                  <option value="10" selected>Show: 10 Rows</option>
+                  <option value="25">Show: 25 Rows</option>
+                  <option value="50">Show: 50 Rows</option>
+                  <option value="100">Show: 100 Rows</option>
+                  <option value="ALL">Show: All Rows</option>
+                </select>
+              </div>
             </div>
-          </div>
 
-          <!-- Pre-run Cost Gate Modal / Box -->
-          <div id="cost-estimate-card" class="cost-gate-card mt-4 hidden">
-            <div class="cost-gate-header">
-              <div class="gate-title-group">
-                <span class="gate-icon">⚖️</span>
-                <div>
-                  <h3>Pre-Run Cost & Workload Gate</h3>
-                  <p class="subtitle">Scrapers and LLM synthesis remain locked until explicitly approved by the operator.</p>
+            <!-- View 1: Compact Scrollable & Drag-Resizable Table -->
+            <div id="portals-table-wrapper" class="resizable-table-wrapper">
+              <div id="portals-table-view" class="table-scroll-container" style="max-height: 430px;">
+                <table class="enterprise-table compact-table">
+                  <thead>
+                    <tr>
+                      <th class="col-num">#</th>
+                      <th class="sortable-th" onclick="setPortalsSort('name-asc')">University Name ⇅</th>
+                      <th class="col-native">Native Name</th>
+                      <th class="sortable-th col-region" onclick="setPortalsSort('region-asc')">Region ⇅</th>
+                      <th class="sortable-th col-tier" onclick="setPortalsSort('tier-asc')">Tier ⇅</th>
+                      <th class="sortable-th col-status" onclick="setPortalsSort('status-asc')">Live Status ⇅</th>
+                      <th>Official Homepage & Department Endpoints</th>
+                      <th class="col-action">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="matched-endpoints-tbody">
+                    <!-- Dynamically populated -->
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-resize-handle" data-target="portals-table-view" data-table="portals" title="Drag up or down to resize table block & load more rows">
+                <span class="resize-grip"></span>
+                <span class="resize-label">⇕ Drag to expand/shrink table block (<span id="portals-showing-label">Showing 10 rows</span>)</span>
+                <span class="resize-grip"></span>
+              </div>
+            </div>
+
+            <!-- View 2: In-Place Live Operations & University Progress Logs -->
+            <div id="portals-logs-view" class="inline-logs-panel hidden">
+              <div class="inline-logs-toolbar">
+                <div class="logs-toolbar-left">
+                  <span class="pulse-ring-sm"></span>
+                  <strong>Live University & Supervisor Extraction Feed</strong>
+                  <input type="text" id="inline-log-search" class="form-control form-control-sm ml-2" style="width: 260px;" placeholder="Filter logs by university or keyword..." oninput="renderInlineLogs()" />
+                </div>
+                <div class="logs-toolbar-right">
+                  <button class="btn btn-secondary btn-sm" onclick="clearInlineLogs()">Clear Feed</button>
                 </div>
               </div>
-              <div class="gate-status-pill">
-                <span class="status-indicator locked"></span> Gate Status: <strong id="gate-status-text">LOCKED</strong>
+              <div id="inline-logs-stream" class="inline-logs-stream">
+                <div class="log-entry info">[SYSTEM] Ready. Click 'Execute Live Discovery', 'Resolve Real Dept Links', or launch Supervisor Workers in Section 03 to watch live university-by-university progress here.</div>
               </div>
-            </div>
-
-            <div class="metrics-grid mt-3">
-              <div class="metric-card">
-                <span class="metric-label">Target Universities</span>
-                <span id="est-univs" class="metric-val">0</span>
-              </div>
-              <div class="metric-card">
-                <span class="metric-label">Parallel Crawler Tasks</span>
-                <span id="est-depts" class="metric-val">0</span>
-              </div>
-              <div class="metric-card">
-                <span class="metric-label">Estimated Master Supervisors</span>
-                <span id="est-faculty" class="metric-val">0</span>
-              </div>
-              <div class="metric-card">
-                <span class="metric-label">Estimated Gemini Tokens</span>
-                <span id="est-tokens" class="metric-val">0</span>
-                <span class="metric-subnote">Web crawl: $0 | Tokens: Downstream drafts only</span>
-              </div>
-              <div class="metric-card">
-                <span class="metric-label">Estimated Runtime</span>
-                <span id="est-runtime" class="metric-val">0s</span>
-              </div>
-            </div>
-
-            <div class="cost-gate-actions mt-3">
-              <button id="btn-approve-gate" class="btn btn-success btn-lg btn-interactive" onclick="approveCostGate()">
-                <span id="btn-approve-spinner" class="spinner-inline hidden"></span>
-                <span id="btn-approve-text">✓ Approve Gate & Launch Parallel Harvesters</span>
-              </button>
             </div>
           </div>
 
@@ -345,81 +367,287 @@
         <div class="card-header">
           <div class="section-indicator">
             <span class="indicator-badge">02</span>
-            <span class="indicator-title">INSTITUTIONAL DIRECTORY</span>
+            <span class="indicator-title">INSTITUTIONAL DIRECTORY (<span id="matrix-univ-count">0</span>)</span>
           </div>
           <div class="card-actions">
-            <button class="btn btn-secondary btn-sm" onclick="loadUniversities()">↻ Refresh Directory</button>
+            <div class="view-toggle-group mr-2">
+              <button id="btn-view-matrix-table" class="btn-view-toggle active" onclick="switchMatrixView('table')">📊 Matrix Table</button>
+              <button id="btn-view-matrix-logs" class="btn-view-toggle" onclick="switchMatrixView('logs')">📜 Live Logs</button>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-interactive" onclick="loadUniversities(this)">↻ Refresh Directory</button>
+            <button class="btn btn-success btn-sm ml-2 btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Next: Step 03 Harvest Supervisors ➔</button>
           </div>
         </div>
 
         <div class="card-body">
           <div class="intro-headline">
             <h2>University Feasibility & Scholarship Matrix</h2>
-            <p class="subtitle">Indexed institutions categorized into Tier 1 Dream (Project 985/C9), Tier 2 Target (Project 211), and Tier 3 Safety. Stored persistently in MongoDB.</p>
+            <p class="subtitle">Indexed institutions categorized into Tier 1 Dream (Project 985/C9), Tier 2 Target (Project 211), and Tier 3 Safety. Stored persistently in MongoDB. Next step: launch parallel supervisor crawler workers in Section 03 below.</p>
           </div>
 
-          <!-- Custom Scrollable Table Container -->
-          <div class="table-scroll-container mt-3">
-            <table class="enterprise-table">
-              <thead>
-                <tr>
-                  <th class="col-num">#</th>
-                  <th>University Name</th>
-                  <th>Native Name</th>
-                  <th>Official Domain</th>
-                  <th>CS Rank</th>
-                  <th>Feasibility Tier</th>
-                  <th>Available Scholarships</th>
-                  <th>Application Fee</th>
-                  <th>Outreach Strategy</th>
-                </tr>
-              </thead>
-              <tbody id="universities-tbody">
-                <!-- Dynamically populated from MongoDB -->
-              </tbody>
-            </table>
+          <!-- Live Filter & Sort Toolbar for Section 02 Matrix -->
+          <div id="matrix-filter-toolbar" class="table-toolbar mt-3">
+            <div class="toolbar-item toolbar-search">
+              <input type="text" id="matrix-search-input" class="form-control form-control-sm" placeholder="🔎 Search matrix by university name, Chinese name, domain, or strategy..." oninput="applyMatrixTableFilter()" />
+            </div>
+            <div class="toolbar-item">
+              <select id="matrix-region-filter" class="form-control form-control-sm" onchange="applyMatrixTableFilter()">
+                <option value="All">All Regions</option>
+              </select>
+            </div>
+            <div class="toolbar-item">
+              <select id="matrix-tier-filter" class="form-control form-control-sm" onchange="applyMatrixTableFilter()">
+                <option value="All">All Tiers</option>
+                <option value="Tier 1 (Dream)">Tier 1 (Dream - 985)</option>
+                <option value="Tier 2 (Target)">Tier 2 (Target - 211)</option>
+                <option value="Tier 3 (Safety)">Tier 3 (Safety)</option>
+              </select>
+            </div>
+            <div class="toolbar-item">
+              <select id="matrix-sort-select" class="form-control form-control-sm" onchange="applyMatrixTableFilter()">
+                <option value="region-asc" selected>Sort: Region (A → Z)</option>
+                <option value="region-desc">Sort: Region (Z → A)</option>
+                <option value="tier-asc">Sort: Tier (Dream → Safety)</option>
+                <option value="name-asc">Sort: University Name (A → Z)</option>
+                <option value="fee-asc">Sort: Application Fee (Waived First)</option>
+              </select>
+            </div>
+            <div class="toolbar-item">
+              <select id="matrix-limit-select" class="form-control form-control-sm" onchange="onTableLimitChange('matrix', this.value)" title="Number of rows shown in matrix">
+                <option value="10" selected>Show: 10 Rows</option>
+                <option value="25">Show: 25 Rows</option>
+                <option value="50">Show: 50 Rows</option>
+                <option value="100">Show: 100 Rows</option>
+                <option value="ALL">Show: All Rows</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Custom Scrollable & Drag-Resizable Table Container -->
+          <div id="matrix-table-wrapper" class="resizable-table-wrapper">
+            <div id="matrix-table-view" class="table-scroll-container" style="max-height: 430px;">
+              <table class="enterprise-table compact-table">
+                <thead>
+                  <tr>
+                    <th class="col-num">#</th>
+                    <th class="sortable-th" onclick="setMatrixSort('name-asc')">University Name ⇅</th>
+                    <th class="col-native">Native Name</th>
+                    <th class="sortable-th col-region" onclick="setMatrixSort('region-asc')">Region ⇅</th>
+                    <th>Official Domain</th>
+                    <th>National Classification</th>
+                    <th class="sortable-th col-tier" onclick="setMatrixSort('tier-asc')">Feasibility Tier ⇅</th>
+                    <th>Available Scholarships</th>
+                    <th class="sortable-th" onclick="setMatrixSort('fee-asc')">Application Fee ⇅</th>
+                    <th>Live Status & Strategy</th>
+                  </tr>
+                </thead>
+                <tbody id="universities-tbody">
+                  <!-- Dynamically populated from MongoDB -->
+                </tbody>
+              </table>
+            </div>
+            <div class="table-resize-handle" data-target="matrix-table-view" data-table="matrix" title="Drag up or down to resize table block & load more rows">
+              <span class="resize-grip"></span>
+              <span class="resize-label">⇕ Drag to expand/shrink table block (<span id="matrix-showing-label">Showing 10 rows</span>)</span>
+              <span class="resize-grip"></span>
+            </div>
+          </div>
+
+          <!-- In-place Logs View for Section 02 -->
+          <div id="matrix-logs-view" class="inline-logs-panel hidden mt-2">
+            <div id="matrix-logs-stream" class="inline-logs-stream">
+              <div class="log-entry info">[SYSTEM] Live operational logs synced from discovery and harvesting workers.</div>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- Section 3: Faculty Roster & Extraction Stream -->
+      <!-- Section 3: Faculty Roster & Parallel Worker Extraction Center -->
       <section id="tab-faculty" class="enterprise-card page-section mt-4">
         <div class="card-header">
           <div class="section-indicator">
             <span class="indicator-badge">03</span>
-            <span class="indicator-title">SUPERVISOR ROSTER</span>
+            <span class="indicator-title">SUPERVISOR ROSTER & WORKER POOL (<span id="faculty-total-count">0</span> Verified)</span>
           </div>
           <div class="card-actions">
-            <button class="btn btn-secondary btn-sm" onclick="loadFaculty()">↻ Refresh Roster</button>
+            <div class="view-toggle-group mr-2">
+              <button id="btn-view-faculty-table" class="btn-view-toggle active" onclick="switchFacultyView('table')">📊 Supervisors Table</button>
+              <button id="btn-view-faculty-logs" class="btn-view-toggle" onclick="switchFacultyView('logs')">📜 Live Worker Logs</button>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-interactive" onclick="loadFaculty(this)">↻ Refresh Roster</button>
           </div>
         </div>
 
         <div class="card-body">
           <div class="intro-headline">
-            <h2>Verified Graduate Supervisors Roster</h2>
-            <p class="subtitle">Faculty verified with Master's (硕士生导师 / 硕导) credentials from official .edu.cn sites. Every record is verified with an anti-negation filter and cryptographic SHA-256 raw HTML lineage.</p>
+            <h2>Verified Graduate Supervisors Roster & Parallel Extraction Engine</h2>
+            <p class="subtitle">Select a target region and its universities, configure how many parallel crawler workers to run at once, and launch live extraction of verified Master's (硕士生导师 / 硕导) supervisors with zero Cost Gate lock.</p>
           </div>
 
-          <!-- Custom Scrollable Table Container -->
-          <div class="table-scroll-container mt-3">
-            <table class="enterprise-table">
-              <thead>
-                <tr>
-                  <th class="col-num">#</th>
-                  <th>Supervisor Name</th>
-                  <th>University</th>
-                  <th>Department</th>
-                  <th>Qualification</th>
-                  <th>Contact Email</th>
-                  <th>Research Focus Areas</th>
-                  <th>Lineage SHA-256</th>
-                  <th>Source Evidence</th>
-                </tr>
-              </thead>
-              <tbody id="faculty-tbody">
-                <!-- Dynamically populated from MongoDB -->
-              </tbody>
-            </table>
+          <!-- Parallel Supervisor Worker Control Panel (Region -> Universities -> Worker Count) -->
+          <div class="filter-panel mt-3">
+            <div class="form-grid-3">
+              <!-- Column 1: Region Selection & University Count -->
+              <div class="form-group">
+                <div class="flex-between">
+                  <label for="sup-region-select">1. Select Target Region:</label>
+                  <span id="sup-region-univ-count-badge" class="badge badge-tier-2">0 Universities in Region</span>
+                </div>
+                <select id="sup-region-select" class="form-control mt-1" onchange="onSupervisorRegionChange()">
+                  <option value="All">All Regions (Loading...)</option>
+                </select>
+
+                <label for="sup-tier-select" class="mt-2">Filter Region Universities by Tier:</label>
+                <select id="sup-tier-select" class="form-control" onchange="onSupervisorRegionChange()">
+                  <option value="All">All Tiers in Region</option>
+                  <option value="Tier 1 (Dream)">Tier 1 (Dream — Project 985)</option>
+                  <option value="Tier 2 (Target)">Tier 2 (Target — Project 211)</option>
+                  <option value="Tier 3 (Safety)">Tier 3 (Safety — Provincial)</option>
+                </select>
+                <span class="form-hint mt-1">Automatically filters the university list in Column 2.</span>
+              </div>
+
+              <!-- Column 2: Specific Universities in Selected Region -->
+              <div class="form-group">
+                <div class="flex-between">
+                  <label for="sup-univ-select">2. Select Universities in Region:</label>
+                  <span id="sup-selected-univ-badge" class="badge badge-tier-3">All Selected</span>
+                </div>
+                <select id="sup-univ-select" class="form-control mt-1" multiple size="6" onchange="updateSupervisorSelectionSummary()">
+                  <option value="ALL_IN_REGION" selected>★ All Universities in Selected Region</option>
+                </select>
+                <span class="form-hint">Choose 'All Universities in Region' or Ctrl/Cmd-click specific universities.</span>
+              </div>
+
+              <!-- Column 3: Worker Concurrency & Launch Control -->
+              <div class="form-group flex-col-between">
+                <div>
+                  <label for="sup-worker-count">3. Parallel Crawler Workers (At Once):</label>
+                  <select id="sup-worker-count" class="form-control mt-1">
+                    <option value="1">1 Worker (Sequential / Diagnostic)</option>
+                    <option value="3">3 Workers (Light Concurrency)</option>
+                    <option value="5" selected>5 Workers (Recommended Balanced Pool)</option>
+                    <option value="8">8 Workers (Fast Regional Crawl)</option>
+                    <option value="10">10 Workers (High-Speed Parallel)</option>
+                    <option value="15">15 Workers (Heavy Batch Pool)</option>
+                    <option value="20">20 Workers (Maximum Concurrency)</option>
+                  </select>
+
+                  <label for="sup-discipline-select" class="mt-2">Target Department Discipline:</label>
+                  <select id="sup-discipline-select" class="form-control">
+                    <option value="Computer Science">Computer Science & Technology (计算机/数计)</option>
+                    <option value="Artificial Intelligence">Artificial Intelligence & Control (人工智能/智能)</option>
+                    <option value="Software Engineering">Software & Information Engineering (软件/信息工程)</option>
+                  </select>
+                </div>
+
+                <div class="search-action-box mt-3">
+                  <button id="btn-launch-sup-workers" class="btn btn-success btn-block btn-interactive" onclick="launchSupervisorWorkerPool()">
+                    <span id="btn-sup-spinner" class="spinner-inline hidden"></span>
+                    <span id="btn-sup-text">🚀 Launch Parallel Supervisor Workers</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real-Time Supervisor Worker Pool Progress Tracker -->
+          <div id="sup-worker-progress-card" class="progress-tracker-card mt-3 hidden">
+            <div class="tracker-header">
+              <div class="tracker-status-left">
+                <span class="pulse-ring"></span>
+                <div>
+                  <span id="sup-tracker-badge" class="badge badge-primary">WORKER POOL ACTIVE</span>
+                  <h4 id="sup-tracker-title" class="tracker-title mt-1">Crawling university homepages & supervisor directories...</h4>
+                </div>
+              </div>
+              <div class="tracker-actions">
+                <span id="sup-tracker-stats" class="badge badge-tier-3 mr-2">0 Supervisors Found</span>
+                <button class="btn btn-secondary btn-sm" onclick="switchFacultyView('logs')">📜 View Live Worker Logs</button>
+              </div>
+            </div>
+            <div class="progress-bar-container mt-2">
+              <div class="progress-track">
+                <div id="sup-tracker-bar" class="progress-fill" style="width: 10%;"></div>
+              </div>
+              <div class="progress-meta mt-1">
+                <span id="sup-tracker-pct" class="progress-percent">0% Completed</span>
+                <span id="sup-tracker-detail" class="progress-subtext">Initializing worker pool...</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Filter Toolbar for Supervisors Roster Table -->
+          <div id="faculty-filter-toolbar" class="table-toolbar mt-3">
+            <div class="toolbar-item toolbar-search">
+              <input type="text" id="faculty-search-input" class="form-control form-control-sm" placeholder="🔎 Filter harvested supervisors by name, university, email, or research area..." oninput="applyFacultyTableFilter()" />
+            </div>
+            <div class="toolbar-item">
+              <select id="faculty-univ-filter" class="form-control form-control-sm" onchange="applyFacultyTableFilter()">
+                <option value="All">All Universities</option>
+              </select>
+            </div>
+            <div class="toolbar-item">
+              <select id="faculty-qual-filter" class="form-control form-control-sm" onchange="applyFacultyTableFilter()">
+                <option value="All">All Qualifications (硕导 / 博导)</option>
+                <option value="Master">Master's Supervisor (硕导)</option>
+                <option value="Doctoral">Doctoral Supervisor (博导)</option>
+              </select>
+            </div>
+            <div class="toolbar-item">
+              <select id="faculty-limit-select" class="form-control form-control-sm" onchange="onTableLimitChange('faculty', this.value)" title="Number of rows shown in roster">
+                <option value="10" selected>Show: 10 Rows</option>
+                <option value="25">Show: 25 Rows</option>
+                <option value="50">Show: 50 Rows</option>
+                <option value="100">Show: 100 Rows</option>
+                <option value="ALL">Show: All Rows</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- View 1: Custom Scrollable & Drag-Resizable Supervisors Table -->
+          <div id="faculty-table-wrapper" class="resizable-table-wrapper">
+            <div id="faculty-table-view" class="table-scroll-container" style="max-height: 430px;">
+              <table class="enterprise-table compact-table">
+                <thead>
+                  <tr>
+                    <th class="col-num">#</th>
+                    <th>Supervisor Name</th>
+                    <th>University</th>
+                    <th>Department</th>
+                    <th>Qualification</th>
+                    <th>Contact Email</th>
+                    <th>Research Focus Areas</th>
+                    <th>Lineage SHA-256</th>
+                    <th>Source Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="faculty-tbody">
+                  <!-- Dynamically populated from MongoDB -->
+                </tbody>
+              </table>
+            </div>
+            <div class="table-resize-handle" data-target="faculty-table-view" data-table="faculty" title="Drag up or down to resize table block & load more rows">
+              <span class="resize-grip"></span>
+              <span class="resize-label">⇕ Drag to expand/shrink table block (<span id="faculty-showing-label">Showing 10 rows</span>)</span>
+              <span class="resize-grip"></span>
+            </div>
+          </div>
+
+          <!-- View 2: In-Place Live Worker & University Extraction Logs -->
+          <div id="faculty-logs-view" class="inline-logs-panel hidden">
+            <div class="inline-logs-toolbar">
+              <div class="logs-toolbar-left">
+                <span class="pulse-ring-sm"></span>
+                <strong>Live Parallel Worker & Supervisor Extraction Feed</strong>
+              </div>
+              <div class="logs-toolbar-right">
+                <button class="btn btn-secondary btn-sm" onclick="clearInlineLogs()">Clear Feed</button>
+              </div>
+            </div>
+            <div id="faculty-logs-stream" class="inline-logs-stream">
+              <div class="log-entry info">[WORKER POOL] Select a region and click 'Launch Parallel Supervisor Workers' above to stream live extraction logs here.</div>
+            </div>
           </div>
         </div>
       </section>
@@ -523,8 +751,56 @@
 
         <div class="card-body">
           <div class="intro-headline">
-            <h2>Split-Pane Outreach Review Workspace</h2>
-            <p class="subtitle">Inspect Gemini-synthesized research summaries and review/edit personalized outreach drafts (&lt;200 words). Emails cannot be sent without explicit operator approval.</p>
+            <h2>Split-Pane Outreach Review Workspace & Gemini LLM Token Gate</h2>
+            <p class="subtitle">Phase 2 AI Synthesis: Estimate Gemini token usage for your harvested supervisors, approve the LLM Token Gate, and inspect/edit personalized outreach drafts (&lt;200 words).</p>
+          </div>
+
+          <!-- Transferred Pre-Run LLM Token & Cost Gate (Belongs to Phase 2 AI Synthesis, NOT Phase 1 Web Scraping) -->
+          <div id="cost-estimate-card" class="cost-gate-card mt-3">
+            <div class="cost-gate-header">
+              <div class="gate-title-group">
+                <span class="gate-icon">⚖️</span>
+                <div>
+                  <h3>Phase 2 Pre-Run Gemini LLM Token & Synthesis Gate</h3>
+                  <p class="subtitle">Controls Gemini API token expenditure before generating personalized cold outreach drafts for harvested supervisors.</p>
+                </div>
+              </div>
+              <div class="gate-status-pill">
+                <span class="status-indicator locked"></span> LLM Gate: <strong id="gate-status-text">READY FOR ESTIMATE</strong>
+              </div>
+            </div>
+
+            <div class="metrics-grid mt-3">
+              <div class="metric-card">
+                <span class="metric-label">Harvested Supervisors</span>
+                <span id="est-faculty" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Target Universities</span>
+                <span id="est-univs" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Target Departments</span>
+                <span id="est-depts" class="metric-val">0</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Estimated Gemini Tokens</span>
+                <span id="est-tokens" class="metric-val">0</span>
+                <span class="metric-subnote">~650 tokens / supervisor draft</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Estimated Synthesis Time</span>
+                <span id="est-runtime" class="metric-val">0s</span>
+              </div>
+            </div>
+
+            <div class="cost-gate-actions mt-3">
+              <button class="btn btn-secondary btn-sm mr-2" onclick="prepareEstimateForMatched()">📊 Calculate LLM Token Estimate</button>
+              <button id="btn-approve-gate" class="btn btn-success btn-sm btn-interactive" onclick="approveCostGate()">
+                <span id="btn-approve-spinner" class="spinner-inline hidden"></span>
+                <span id="btn-approve-text">✓ Approve Token Gate & Synthesize Drafts</span>
+              </button>
+            </div>
           </div>
 
           <div class="split-pane-layout mt-3">

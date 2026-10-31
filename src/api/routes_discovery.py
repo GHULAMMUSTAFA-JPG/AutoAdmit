@@ -33,21 +33,38 @@ class FilterUniversitiesRequest(BaseModel):
     max_rank: Optional[int] = None
     discipline: str = "Computer Science"
     keyword: Optional[str] = None
+    source: str = "combined"
+
+
+class ResolveDepartmentsRequest(BaseModel):
+    domains: List[str]
+    discipline: str = "Computer Science"
 
 
 @router.post("/filter", response_model=List[University])
 async def filter_universities_endpoint(request: FilterUniversitiesRequest, user: str = Depends(get_current_user)):
-    """Filters Chinese universities dynamically by Region, Tier/Rank, and attaches CS/AI department endpoints."""
+    """Filters Chinese universities dynamically by Source ('combined', 'wikidata', 'moe'), Region, Tier/Rank, and Keyword."""
     matched = discovery_engine.filter_universities(
         regions=request.regions,
         tiers=request.tiers,
         max_rank=request.max_rank,
-        keyword=request.keyword
+        keyword=request.keyword,
+        source=request.source
     )
     for u in matched:
-        u.department_endpoints = discovery_engine.discover_department_endpoints(u, request.discipline)
+        if not u.department_endpoints:
+            u.department_endpoints = discovery_engine.discover_department_endpoints(u, request.discipline)
         if db_manager.is_connected and db_manager.db is not None:
             try:
+                existing = await db_manager.get_collection("universities").find_one({"domain": u.domain})
+                if existing and existing.get("verified_at") and existing.get("pipeline_status") in (
+                    "Homepage Verified", "Department URL Found", "Faculty Page Found", "Professor Extraction Completed"
+                ):
+                    u.pipeline_status = existing["pipeline_status"]
+                    u.website_verified = True
+                    u.verified_at = existing["verified_at"]
+                    if existing.get("department_endpoints"):
+                        u.department_endpoints = [DepartmentEndpoint(**ep) for ep in existing["department_endpoints"]]
                 await db_manager.get_collection("universities").update_one(
                     {"domain": u.domain},
                     {"$set": u.model_dump()},
@@ -58,18 +75,58 @@ async def filter_universities_endpoint(request: FilterUniversitiesRequest, user:
     return matched
 
 
+@router.post("/resolve-departments", response_model=List[University])
+async def resolve_departments_endpoint(request: ResolveDepartmentsRequest, user: str = Depends(get_current_user)):
+    """Executes Homepage-First Department & Supervisor Directory Discovery across target university domains."""
+    resolved_list: List[University] = []
+    for dom in request.domains:
+        univ = None
+        if db_manager.is_connected and db_manager.db is not None:
+            doc = await db_manager.get_collection("universities").find_one({"domain": dom})
+            if doc:
+                doc.pop("_id", None)
+                univ = University(**doc)
+        if not univ:
+            univ = discovery_engine.assess_university(dom)
+            univ.department_endpoints = discovery_engine.discover_department_endpoints(univ, request.discipline)
+
+        updated_univ = await discovery_engine.resolve_department_from_homepage(univ, request.discipline)
+        resolved_list.append(updated_univ)
+
+        if db_manager.is_connected and db_manager.db is not None:
+            try:
+                await db_manager.get_collection("universities").update_one(
+                    {"domain": updated_univ.domain},
+                    {"$set": updated_univ.model_dump()},
+                    upsert=True
+                )
+            except Exception:
+                pass
+    return resolved_list
+
+
 from src.core.database import db_manager
 
 
 @router.get("/universities", response_model=List[University])
 async def get_universities_directory(user: str = Depends(get_current_user)):
-    """Returns directory of known universities strictly from MongoDB database without auto-seeding."""
+    """Returns directory of known Master's-granting universities strictly from MongoDB database."""
+    from src.services.discovery import VOCATIONAL_EXCLUSION_EN, VOCATIONAL_EXCLUSION_ZH
+
     if db_manager.is_connected and db_manager.db is not None:
         cursor = db_manager.get_collection("universities").find({})
         results = []
         async for doc in cursor:
             doc.pop("_id", None)
-            results.append(University(**doc))
+            dom = (doc.get("domain") or "").lower().strip()
+            if not dom.endswith(".edu.cn") and not dom.endswith(".ac.cn"):
+                continue
+            en_low = (doc.get("name") or "").lower()
+            zh_low = (doc.get("chinese_name") or "").lower()
+            if any(v in zh_low for v in VOCATIONAL_EXCLUSION_ZH) or any(v in en_low for v in VOCATIONAL_EXCLUSION_EN):
+                continue
+            u = discovery_engine.enrich_university_record(University(**doc))
+            results.append(u)
         return results
 
     # Offline/disconnected fallback returns empty list

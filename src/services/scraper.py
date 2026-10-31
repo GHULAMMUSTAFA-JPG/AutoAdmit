@@ -165,17 +165,30 @@ class FacultyHarvester:
             return decode_html(response.content, response.headers.get("content-type", "")), final_url
 
     async def fetch_html_dynamic(self, url: str) -> Tuple[str, str]:
-        """Fallback tier: headless Playwright for JavaScript-rendered pages."""
+        """Fallback tier: headless Playwright for JavaScript-rendered pages and 412/403 WAF challenges."""
         if not self.is_verified_domain(url):
             raise DomainSecurityViolation(f"Target URL '{url}' is not on a verified educational domain.")
         from playwright.async_api import async_playwright
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+            )
             try:
-                context = await browser.new_context(user_agent=settings.CRAWLER_USER_AGENT, ignore_https_errors=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    ignore_https_errors=True,
+                    locale="zh-CN"
+                )
                 page = await context.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=25000)
+                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                # Allow dynamic WAF challenge scripts (e.g. RiverSecurity 412 cookie reload) to settle
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    await page.wait_for_timeout(2000)
                 final_url = page.url
                 if not self.is_verified_domain(final_url):
                     raise DomainSecurityViolation(f"Browser redirected '{url}' to '{final_url}'.")
@@ -184,8 +197,15 @@ class FacultyHarvester:
                 await browser.close()
 
     async def fetch_page(self, url: str) -> Tuple[str, str]:
-        """Fast tier first; Playwright only when the page is empty / client-rendered."""
-        html, final_url = await self.fetch_html_fast(url)
+        """Fast tier first; Playwright fallback on 412/403/521 WAF challenge or sparse client-rendered DOM."""
+        try:
+            html, final_url = await self.fetch_html_fast(url)
+        except DomainSecurityViolation:
+            raise
+        except Exception as fast_err:
+            logger.info(f"Fast HTTP fetch blocked or failed on {url} ({fast_err}); engaging Headless Playwright fallback...")
+            return await self.fetch_html_dynamic(url)
+
         soup = BeautifulSoup(html, "html.parser")
         if len(soup.get_text(strip=True)) < 200 and not soup.find("a", href=True):
             logger.info(f"Sparse HTML for {url}; engaging Playwright fallback.")

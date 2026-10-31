@@ -29,12 +29,16 @@ class HarvestRequest(BaseModel):
 
 class UniversityHarvestItem(BaseModel):
     university_name: str
+    domain: Optional[str] = None
     department_urls: List[str]
     department_name: str = "School of Computer Science"
 
 
 class BatchHarvestRequest(BaseModel):
     targets: List[UniversityHarvestItem]
+    max_workers: int = 5
+    auto_resolve_homepage: bool = True
+    discipline: str = "Computer Science"
 
 
 @router.get("", response_model=List[FacultyProfile])
@@ -158,66 +162,103 @@ async def harvest_batch_faculty(
     """
     Spawns concurrent worker tasks across multiple universities to harvest
     qualified Master's supervisors (硕导) from department endpoints.
+    No Cost Gate required in Phase 1 (zero LLM token cost during web crawling).
     """
-    estimate_id = "default_session"
-    if estimate_id in active_estimates:
-        estimate, _ = active_estimates[estimate_id]
-        if not estimate.is_approved:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Pre-Run Cost Gate is LOCKED. You must approve the cost estimate before launching harvesters."
-            )
+    from src.services.discovery import discovery_engine
 
     all_extracted: List[FacultyProfile] = []
+    worker_count = max(1, min(request.max_workers, 25))
+    univ_sem = asyncio.Semaphore(worker_count)
 
-    async def _harvest_single_univ(target: UniversityHarvestItem) -> List[FacultyProfile]:
-        profiles = []
-        for url in target.department_urls:
-            try:
-                html, final_url = await harvester.fetch_page(url)
-                candidate_links = harvester.extract_profile_links(html, final_url)
-                found_profiles: List[FacultyProfile] = []
-                if candidate_links:
-                    from src.config import settings
-                    sem = asyncio.Semaphore(settings.MAX_CONCURRENT_REQUESTS)
-                    found_profiles = await harvester.crawl_directory(
-                        directory_url=final_url,
-                        university_name=target.university_name,
-                        department_name=target.department_name,
-                        sem=sem
-                    )
-                else:
-                    single = harvester.parse_profile_html(
-                        html=html,
-                        source_url=final_url,
-                        university_name=target.university_name,
-                        department_name=target.department_name
-                    )
-                    if single:
-                        found_profiles.append(single)
+    total_targets = len(request.targets)
+    logger.info(f"Launching {worker_count} parallel supervisor worker(s) across {total_targets} university target(s)...")
 
-                for profile in found_profiles:
-                    dedup_key = normalizer.generate_dedup_key(profile.email, profile.name, profile.university)
-                    if dedup_key not in professors_cache:
-                        professors_cache[dedup_key] = profile
-                        profiles.append(profile)
+    async def _harvest_single_univ(idx: int, target: UniversityHarvestItem) -> List[FacultyProfile]:
+        async with univ_sem:
+            profiles = []
+            urls_to_crawl = list(target.department_urls)
 
+            # If auto_resolve_homepage is enabled and the URL is a root homepage, resolve real CS/AI faculty directory first
+            if request.auto_resolve_homepage and target.domain:
+                needs_resolution = (
+                    not urls_to_crawl or
+                    all(u.rstrip("/").endswith(target.domain) for u in urls_to_crawl)
+                )
+                if needs_resolution:
+                    logger.info(f"[Worker] [{idx}/{total_targets}] [{target.university_name}] Resolving real CS/AI department & supervisor directory from homepage ({target.domain})...")
+                    try:
+                        univ_obj = discovery_engine.assess_university(target.domain, target.university_name)
+                        resolved_u = await discovery_engine.resolve_department_from_homepage(univ_obj, request.discipline)
+                        if resolved_u.department_endpoints:
+                            urls_to_crawl = [ep.url for ep in resolved_u.department_endpoints]
                         if db_manager.is_connected and db_manager.db is not None:
-                            try:
-                                await db_manager.get_collection("professors").update_one(
-                                    {"email": profile.email},
-                                    {"$set": profile.model_dump()},
-                                    upsert=True
-                                )
-                            except Exception as e:
-                                logger.error(f"Error persisting profile to MongoDB: {e}")
+                            await db_manager.get_collection("universities").update_one(
+                                {"domain": target.domain},
+                                {"$set": {
+                                    "pipeline_status": resolved_u.pipeline_status,
+                                    "department_endpoints": [ep.model_dump() for ep in resolved_u.department_endpoints]
+                                }}
+                            )
+                    except Exception as res_err:
+                        logger.warning(f"[Worker] [{target.university_name}] Homepage department resolution warning: {res_err}")
 
-                        asyncio.create_task(trigger_draft_creation(profile))
-            except Exception as e:
-                logger.warning(f"Batch harvest error on {url}: {e}. Fault isolated, continuing.")
-        return profiles
+            logger.info(f"[Worker] [{idx}/{total_targets}] [{target.university_name}] Scanning {len(urls_to_crawl)} endpoint(s) for Master's Supervisors (硕导)...")
+            for url in urls_to_crawl:
+                try:
+                    html, final_url = await harvester.fetch_page(url)
+                    candidate_links = harvester.extract_profile_links(html, final_url)
+                    found_profiles: List[FacultyProfile] = []
+                    if candidate_links:
+                        logger.info(f"[Worker] [{target.university_name}] Found {len(candidate_links)} candidate faculty profile links on {final_url}. Inspecting...")
+                        sem = asyncio.Semaphore(worker_count)
+                        found_profiles = await harvester.crawl_directory(
+                            directory_url=final_url,
+                            university_name=target.university_name,
+                            department_name=target.department_name,
+                            sem=sem
+                        )
+                    else:
+                        single = harvester.parse_profile_html(
+                            html=html,
+                            source_url=final_url,
+                            university_name=target.university_name,
+                            department_name=target.department_name
+                        )
+                        if single:
+                            found_profiles.append(single)
 
-    tasks = [_harvest_single_univ(target) for target in request.targets]
+                    for profile in found_profiles:
+                        dedup_key = normalizer.generate_dedup_key(profile.email, profile.name, profile.university)
+                        if dedup_key not in professors_cache:
+                            professors_cache[dedup_key] = profile
+                            profiles.append(profile)
+                            logger.info(f"[Worker] [{target.university_name}] ✓ Verified Supervisor: {profile.name} ({profile.qualification}) <{profile.email}>")
+
+                            if db_manager.is_connected and db_manager.db is not None:
+                                try:
+                                    await db_manager.get_collection("professors").update_one(
+                                        {"email": profile.email},
+                                        {"$set": profile.model_dump()},
+                                        upsert=True
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error persisting profile to MongoDB: {e}")
+                except Exception as e:
+                    logger.warning(f"[Worker] [{target.university_name}] Harvest error on {url}: {e}. Fault isolated, continuing.")
+
+            if db_manager.is_connected and db_manager.db is not None and profiles:
+                try:
+                    await db_manager.get_collection("universities").update_one(
+                        {"name": target.university_name},
+                        {"$set": {"pipeline_status": "Professor Extraction Completed"}}
+                    )
+                except Exception:
+                    pass
+
+            logger.info(f"[Worker] [{idx}/{total_targets}] [{target.university_name}] Finished. Verified {len(profiles)} Master's/PhD supervisor(s).")
+            return profiles
+
+    tasks = [_harvest_single_univ(i + 1, target) for i, target in enumerate(request.targets)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for res in results:
         if isinstance(res, list):
