@@ -83,11 +83,20 @@ def registrable_domain(host: str) -> str:
 class FacultyHarvester:
     """Polite dual-tier fetcher plus directory and profile parsers."""
 
+    # Global 1-at-a-time semaphore for Headless Chromium so 3 parallel workers never spawn multiple heavy browsers
+    _playwright_semaphore: Optional[asyncio.Semaphore] = None
+
     def __init__(self, worker_id: Optional[str] = None):
         self.worker_id = worker_id or f"worker-{os.getpid()}-{str(uuid.uuid4())[:6]}"
         self._robots: Dict[str, Optional[RobotFileParser]] = {}
         self._host_last: Dict[str, float] = {}
         self._host_locks: Dict[str, asyncio.Lock] = {}
+
+    @classmethod
+    def _get_pw_semaphore(cls) -> asyncio.Semaphore:
+        if cls._playwright_semaphore is None:
+            cls._playwright_semaphore = asyncio.Semaphore(1)
+        return cls._playwright_semaphore
 
     # ------------------------------------------------------------------ domains
     @staticmethod
@@ -165,36 +174,68 @@ class FacultyHarvester:
             return decode_html(response.content, response.headers.get("content-type", "")), final_url
 
     async def fetch_html_dynamic(self, url: str) -> Tuple[str, str]:
-        """Fallback tier: headless Playwright for JavaScript-rendered pages and 412/403 WAF challenges."""
+        """
+        Fallback tier: headless Playwright for JavaScript-rendered pages and 412/403 WAF challenges.
+        Runs sync_playwright inside a dedicated worker thread with WindowsProactorEventLoopPolicy
+        so Windows uvicorn --reload (SelectorEventLoop) never raises NotImplementedError on subprocess creation.
+        """
         if not self.is_verified_domain(url):
             raise DomainSecurityViolation(f"Target URL '{url}' is not on a verified educational domain.")
-        from playwright.async_api import async_playwright
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-            )
-            try:
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    ignore_https_errors=True,
-                    locale="zh-CN"
+        def _sync_playwright_fetch(target_url: str) -> Tuple[str, str]:
+            import sys
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--disable-dev-shm-usage",
+                        "--disable-extensions",
+                    ]
                 )
-                page = await context.new_page()
-                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                # Allow dynamic WAF challenge scripts (e.g. RiverSecurity 412 cookie reload) to settle
+                context = None
                 try:
-                    await page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    await page.wait_for_timeout(2000)
-                final_url = page.url
-                if not self.is_verified_domain(final_url):
-                    raise DomainSecurityViolation(f"Browser redirected '{url}' to '{final_url}'.")
-                return await page.content(), final_url
-            finally:
-                await browser.close()
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        ignore_https_errors=True,
+                        locale="zh-CN"
+                    )
+                    page = context.new_page()
+                    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    page.goto(target_url, wait_until="domcontentloaded", timeout=12000)
+                    # Allow dynamic WAF challenge scripts (e.g. RiverSecurity 412 cookie reload) to settle
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=3500)
+                    except Exception:
+                        page.wait_for_timeout(1000)
+                    final_u = page.url
+                    content_html = page.content()
+                    return content_html, final_u
+                finally:
+                    if context:
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+
+        async with self._get_pw_semaphore():
+            html_content, final_url = await asyncio.wait_for(
+                asyncio.to_thread(_sync_playwright_fetch, url),
+                timeout=18.0
+            )
+        if not self.is_verified_domain(final_url):
+            raise DomainSecurityViolation(f"Browser redirected '{url}' to '{final_url}'.")
+        return html_content, final_url
 
     async def fetch_page(self, url: str) -> Tuple[str, str]:
         """Fast tier first; Playwright fallback on 412/403/521 WAF challenge or sparse client-rendered DOM."""

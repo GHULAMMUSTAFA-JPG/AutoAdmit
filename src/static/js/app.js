@@ -316,21 +316,56 @@ function getRegionBadgeClass(region) {
   return "badge-region-default";
 }
 
-function getPipelineStatusBadge(status) {
-  const s = status || "Pending Live Check";
-  if (s === "Professor Extraction Completed") return `<span class="badge badge-status-extracted">✓ Supervisors Extracted</span>`;
-  if (s === "Faculty Page Found") return `<span class="badge badge-status-faculty">✓ Faculty Page Found</span>`;
-  if (s === "Department URL Found") return `<span class="badge badge-status-dept">✓ Dept URL Found</span>`;
-  if (s === "Department URL Not Found") return `<span class="badge badge-status-missing">⚠ Dept URL Not Found</span>`;
-  if (s === "Requires Manual Review") return `<span class="badge badge-status-manual">✗ Manual Review</span>`;
-  if (s === "Homepage Verified" || s === "University Homepage Verified") {
-    return `<span class="badge badge-status-verified">● Homepage Verified</span>`;
-  }
-  return `<span class="badge badge-status-pending" title="Not live-probed yet. Click 'Find Dept' or 'Resolve Real Dept Links' or launch Worker Pool to verify live.">⏳ Pending Live Check</span>`;
+function escapeAttr(str) {
+  return String(str || "").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Table Row Block Limits & Drag-to-Resize Controller
+function getPipelineStatusBadge(status, reason) {
+  const s = status || "Pending Live Check";
+  const tip = escapeAttr(reason || s);
+  if (s === "Professor Extraction Completed") {
+    return `<div style="display:flex; flex-direction:column; gap:2px;">
+      <span class="badge badge-status-verified" title="Step 1 Succeeded: Official homepage verified live.">✓ Step 1: Homepage OK</span>
+      <span class="badge badge-status-extracted" title="${tip || 'Master/PhD supervisors extracted and verified in MongoDB.'}">✓ Step 2 & 3: Supervisors Extracted ⓘ</span>
+    </div>`;
+  }
+  if (s === "Faculty Page Found") {
+    return `<div style="display:flex; flex-direction:column; gap:2px;">
+      <span class="badge badge-status-verified" title="Step 1 Succeeded: Official homepage verified live.">✓ Step 1: Homepage OK</span>
+      <span class="badge badge-status-faculty" title="${tip || 'Step 2 & 3 Succeeded: Live-verified CS/AI department and confirmed Supervisor Roster URL.'}">✓ Step 2: Dept + Roster Found ⓘ</span>
+    </div>`;
+  }
+  if (s === "Department URL Found") {
+    return `<div style="display:flex; flex-direction:column; gap:2px;">
+      <span class="badge badge-status-verified" title="Step 1 Succeeded: Official homepage verified live.">✓ Step 1: Homepage OK</span>
+      <span class="badge badge-status-dept" title="${tip || 'Step 2 Succeeded: Resolved official CS/AI school URL.'}">✓ Step 2: CS/AI Dept Found ⓘ</span>
+    </div>`;
+  }
+  if (s === "Homepage OK · Dept Not Found" || s === "Department URL Not Found") {
+    const errTip = escapeAttr(reason || "Step 1 Succeeded (Homepage reachable), but Step 2 did not find a static CS/AI department link in '院系设置' or common subdomains.");
+    return `<div style="display:flex; flex-direction:column; gap:2px;">
+      <span class="badge badge-status-verified" title="✓ Step 1 Succeeded: University homepage is live and saved in MongoDB!">✓ Step 1: Homepage OK</span>
+      <span class="badge badge-status-missing" title="❌ STEP 2 REASON: ${errTip}">✗ Step 2: Dept Not Found ⓘ</span>
+    </div>`;
+  }
+  if (s === "Step 1 Failed: Homepage Unreachable" || s === "Requires Manual Review") {
+    const errTip = escapeAttr(reason || "Step 1 Failed: Homepage and CS/AI subdomains timed out, failed DNS, or were blocked by WAF.");
+    return `<span class="badge badge-status-manual" title="❌ STEP 1 FAILED REASON: ${errTip}">✗ Step 1 Failed: Unreachable / WAF ⓘ</span>`;
+  }
+  if (s === "Homepage Verified" || s === "University Homepage Verified") {
+    return `<span class="badge badge-status-verified" title="${tip || 'Step 1 Succeeded: Homepage verified live (HTTP 200 OK).'}">✓ Step 1: Homepage Verified ⓘ</span>`;
+  }
+  return `<span class="badge badge-status-pending" title="⏳ Not live-probed yet. Click '🧭 Verify & Find Dept' on this row or '🧭 Resolve Real Dept Links' above to verify live.">⏳ Pending Live Check</span>`;
+}
+
+// Table Viewport Size (10 visible rows by default = 415px) & Scrollable Row Buffer
 const tableRowLimits = {
+  portals: 9999,
+  matrix: 9999,
+  faculty: 9999
+};
+
+const tableVisibleRowsConfig = {
   portals: 10,
   matrix: 10,
   faculty: 10
@@ -352,7 +387,8 @@ function renderTableSkeleton(tbodyId, colCount = 8, rowCount = 8) {
 }
 
 function onTableLimitChange(tableKey, val) {
-  tableRowLimits[tableKey] = val === "ALL" ? 99999 : (parseInt(val, 10) || 10);
+  const rowsVisible = val === "ALL" ? 150 : (parseInt(val, 10) || 10);
+  tableVisibleRowsConfig[tableKey] = rowsVisible;
   const viewMap = {
     portals: "portals-table-view",
     matrix: "matrix-table-view",
@@ -360,9 +396,9 @@ function onTableLimitChange(tableKey, val) {
   };
   const viewEl = document.getElementById(viewMap[tableKey]);
   if (viewEl) {
-    if (tableRowLimits[tableKey] <= 10) viewEl.style.maxHeight = "430px";
-    else if (tableRowLimits[tableKey] <= 25) viewEl.style.maxHeight = "680px";
-    else viewEl.style.maxHeight = "860px";
+    // ~38px per row + 40px sticky header => 10 rows = 420px viewport with active vertical scrollbar
+    const targetHeight = val === "ALL" ? 1600 : Math.max(260, (rowsVisible * 38) + 42);
+    viewEl.style.maxHeight = `${targetHeight}px`;
   }
   if (tableKey === "portals") applyPortalsTableFilter();
   if (tableKey === "matrix") applyMatrixTableFilter();
@@ -373,7 +409,7 @@ function initTableDragResizers() {
   const handles = document.querySelectorAll(".table-resize-handle");
   handles.forEach(handle => {
     let startY = 0;
-    let startHeight = 430;
+    let startHeight = 420;
     const targetId = handle.getAttribute("data-target");
     const tableKey = handle.getAttribute("data-table");
 
@@ -381,24 +417,21 @@ function initTableDragResizers() {
       const container = document.getElementById(targetId);
       if (!container) return;
       const deltaY = e.clientY - startY;
-      const newHeight = Math.max(240, Math.min(1400, startHeight + deltaY));
+      const newHeight = Math.max(240, Math.min(1800, startHeight + deltaY));
       container.style.maxHeight = `${newHeight}px`;
 
-      // Automatically increase rendered row block as user drags taller
-      const neededRows = Math.max(10, Math.ceil((newHeight - 44) / 38));
-      if (tableKey && neededRows > tableRowLimits[tableKey]) {
-        tableRowLimits[tableKey] = neededRows;
-        const selMap = { portals: "portal-limit-select", matrix: "matrix-limit-select", faculty: "faculty-limit-select" };
-        const selEl = document.getElementById(selMap[tableKey]);
-        if (selEl) {
-          if (neededRows > 100) selEl.value = "ALL";
-          else if (neededRows > 50) selEl.value = "100";
-          else if (neededRows > 25) selEl.value = "50";
-          else if (neededRows > 10) selEl.value = "25";
+      const approxVisibleRows = Math.max(5, Math.round((newHeight - 42) / 38));
+      if (tableKey) {
+        tableVisibleRowsConfig[tableKey] = approxVisibleRows;
+        const lblMap = {
+          portals: "portals-showing-label",
+          matrix: "matrix-showing-label",
+          faculty: "faculty-showing-label"
+        };
+        const lblEl = document.getElementById(lblMap[tableKey]);
+        if (lblEl) {
+          lblEl.textContent = `Viewport: ~${approxVisibleRows} visible rows (Scroll vertically for all records)`;
         }
-        if (tableKey === "portals") applyPortalsTableFilter();
-        if (tableKey === "matrix") applyMatrixTableFilter();
-        if (tableKey === "faculty") applyFacultyTableFilter();
       }
     };
 
@@ -413,12 +446,87 @@ function initTableDragResizers() {
       const container = document.getElementById(targetId);
       if (!container) return;
       startY = e.clientY;
-      startHeight = container.getBoundingClientRect().height || 430;
+      startHeight = container.getBoundingClientRect().height || 420;
       handle.classList.add("dragging");
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
     });
   });
+}
+
+function toggleDiscoveryAuditPanel() {
+  const body = document.getElementById("discovery-audit-body");
+  const chev = document.getElementById("audit-chevron");
+  if (!body) return;
+  const isHidden = body.classList.contains("hidden");
+  if (isHidden) {
+    body.classList.remove("hidden");
+    if (chev) chev.textContent = "▼";
+  } else {
+    body.classList.add("hidden");
+    if (chev) chev.textContent = "▶";
+  }
+}
+
+async function loadLastDiscoveryAudit() {
+  try {
+    const res = await fetchWithAuth("/api/v1/discovery/last-audit");
+    if (!res.ok) return;
+    const audit = await res.json();
+    if (!audit || !audit.total_raw_count) return;
+
+    const box = document.getElementById("discovery-audit-box");
+    if (box) box.classList.remove("hidden");
+
+    const srcLabels = {
+      combined: "Combined Triple-Check (China MOE Master's + Wikidata SPARQL + 985/211)",
+      wikidata: "Wikidata Live SPARQL Registry",
+      moe: "China MOE Official Master's-Granting Registry (硕士点高校)"
+    };
+    const titleEl = document.getElementById("audit-summary-title");
+    if (titleEl) {
+      titleEl.textContent = `Active Search: ${srcLabels[audit.source_mode] || audit.source_mode} | Regions: ${(audit.regions_filter || ["All"]).join(", ")}`;
+    }
+
+    const excludedTotal = (audit.excluded_non_edu_count || 0) + (audit.excluded_vocational_count || 0) + (audit.duplicate_merged_count || 0);
+    const rawBadge = document.getElementById("audit-badge-raw");
+    const filtBadge = document.getElementById("audit-badge-filtered");
+    const normBadge = document.getElementById("audit-badge-norm");
+    if (rawBadge) rawBadge.textContent = `${audit.total_raw_count} Raw Source Records`;
+    if (filtBadge) filtBadge.textContent = `${excludedTotal} Filtered / Deduplicated`;
+    if (normBadge) normBadge.textContent = `${audit.normalized_count} Normalized in MongoDB`;
+
+    const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setTxt("audit-moe-count", audit.moe_raw_count || 0);
+    setTxt("audit-wd-count", audit.wikidata_raw_count || 0);
+    setTxt("audit-non-edu-count", audit.excluded_non_edu_count || 0);
+    setTxt("audit-voc-count", audit.excluded_vocational_count || 0);
+    setTxt("audit-dup-count", audit.duplicate_merged_count || 0);
+    setTxt("audit-final-count", audit.normalized_count || 0);
+
+    const rawTbody = document.getElementById("audit-raw-tbody");
+    if (rawTbody && Array.isArray(audit.raw_preview_rows)) {
+      rawTbody.innerHTML = audit.raw_preview_rows.map((r, i) => {
+        let outBadge = `<span class="badge badge-status-faculty">${r.outcome}</span>`;
+        if ((r.outcome || "").startsWith("REJECTED")) outBadge = `<span class="badge badge-status-manual">${r.outcome}</span>`;
+        else if ((r.outcome || "").startsWith("EXCLUDED")) outBadge = `<span class="badge badge-status-missing">${r.outcome}</span>`;
+        else if ((r.outcome || "").startsWith("MERGED")) outBadge = `<span class="badge badge-status-dept">${r.outcome}</span>`;
+        return `
+          <tr>
+            <td class="col-num">${i + 1}</td>
+            <td><span class="badge version">${r.source_origin}</span></td>
+            <td style="font-family: var(--font-mono); font-size: 0.72rem;">${r.raw_id || "-"}</td>
+            <td><strong>${r.raw_en_name}</strong></td>
+            <td>${r.raw_zh_name}</td>
+            <td style="font-family: var(--font-mono); font-size: 0.72rem;">${r.raw_url}</td>
+            <td>${outBadge}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  } catch (e) {
+    console.error("Failed loading discovery audit:", e);
+  }
 }
 
 function populateRegionFilterDropdown(selectId, universities) {
@@ -468,7 +576,16 @@ function sortUniversityList(list, sortMode) {
       return (a.name || "").localeCompare(b.name || "");
     }
     if (sortMode === "status-asc") {
-      return (a.pipeline_status || "").localeCompare(b.pipeline_status || "");
+      const statusRank = s => {
+        if (!s) return 4;
+        if (s.includes("Faculty") || s.includes("Department") || s.includes("Completed")) return 1;
+        if (s.includes("Homepage OK") || s.includes("Homepage Verified")) return 2;
+        if (s.includes("Pending")) return 3;
+        return 5;
+      };
+      const diff = statusRank(a.pipeline_status) - statusRank(b.pipeline_status);
+      if (diff !== 0) return diff;
+      return (a.name || "").localeCompare(b.name || "");
     }
     if (sortMode === "fee-asc") {
       const fa = a.application_fee_rmb === 0 ? 0 : 500;
@@ -614,9 +731,44 @@ function setPortalsSort(mode) {
   applyPortalsTableFilter();
 }
 
+function populatePortalUnivDropdown() {
+  const univSelect = document.getElementById("portal-univ-filter");
+  if (!univSelect) return;
+  const regionVal = document.getElementById("portal-region-filter")?.value || "All";
+  const tierVal = document.getElementById("portal-tier-filter")?.value || "All";
+  const currentVal = univSelect.value || "All";
+
+  let list = (lastDiscoveredUniversities || []).filter(u => {
+    if (regionVal !== "All" && u.region !== regionVal) return false;
+    if (tierVal !== "All" && u.tier !== tierVal) return false;
+    return true;
+  });
+
+  list = sortUniversityList(list, "name-asc");
+  univSelect.innerHTML = `<option value="All">All Universities in Filter (${list.length})</option>`;
+  list.forEach(u => {
+    const opt = document.createElement("option");
+    opt.value = u.domain;
+    opt.textContent = `${u.name} (${u.domain})`;
+    univSelect.appendChild(opt);
+  });
+
+  if (list.some(u => u.domain === currentVal)) {
+    univSelect.value = currentVal;
+  } else {
+    univSelect.value = "All";
+  }
+}
+
+function onPortalRegionOrTierChange() {
+  populatePortalUnivDropdown();
+  applyPortalsTableFilter();
+}
+
 function renderMatchedEndpoints(universities) {
   lastDiscoveredUniversities = universities || [];
   populateRegionFilterDropdown("portal-region-filter", lastDiscoveredUniversities);
+  populatePortalUnivDropdown();
   applyPortalsTableFilter();
 
   const container = document.getElementById("discovered-endpoints-container");
@@ -630,11 +782,13 @@ function applyPortalsTableFilter() {
   const searchVal = (document.getElementById("portal-search-input")?.value || "").toLowerCase().trim();
   const regionVal = document.getElementById("portal-region-filter")?.value || "All";
   const tierVal = document.getElementById("portal-tier-filter")?.value || "All";
+  const univVal = document.getElementById("portal-univ-filter")?.value || "All";
   const sortVal = document.getElementById("portal-sort-select")?.value || "region-asc";
 
   let filtered = (lastDiscoveredUniversities || []).filter(u => {
     if (regionVal !== "All" && u.region !== regionVal) return false;
     if (tierVal !== "All" && u.tier !== tierVal) return false;
+    if (univVal !== "All" && u.domain !== univVal) return false;
     if (searchVal) {
       const m = (u.name || "").toLowerCase().includes(searchVal) ||
                 (u.chinese_name || "").toLowerCase().includes(searchVal) ||
@@ -660,11 +814,11 @@ function applyPortalsTableFilter() {
     if (showLbl) showLbl.textContent = "Showing 0 rows";
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" class="empty-state-cell">
+        <td colspan="7" class="empty-state-cell">
           <div class="empty-state">
             <span class="empty-icon">🔎</span>
             <h4>No Matching Universities</h4>
-            <p>Adjust your search text, region filter, or tier filter above.</p>
+            <p>Adjust your search text, region filter, tier filter, or university dropdown above.</p>
           </div>
         </td>
       </tr>
@@ -672,33 +826,52 @@ function applyPortalsTableFilter() {
     return;
   }
 
-  const limit = tableRowLimits.portals || 10;
+  const limit = tableRowLimits.portals || 9999;
   const visibleRows = filtered.slice(0, limit);
   const showLbl = document.getElementById("portals-showing-label");
   if (showLbl) {
-    showLbl.textContent = `Showing ${visibleRows.length} of ${filtered.length} rows`;
+    const vpRows = tableVisibleRowsConfig.portals || 10;
+    showLbl.textContent = `Viewport: ~${vpRows} visible rows | Scrollable: ${visibleRows.length} rows`;
   }
 
   visibleRows.forEach((u, idx) => {
     const tr = document.createElement("tr");
-    const endpointsHtml = (u.department_endpoints || []).map(ep =>
-      `<div style="margin-bottom: 2px;">
-        <span class="badge version">${ep.name}</span>
-        <a href="${ep.url}" target="_blank" style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--primary); text-decoration: underline;">${ep.url} ↗</a>
-      </div>`
-    ).join("");
+    const endpointsHtml = (u.department_endpoints || []).map(ep => {
+      let icon = "🌐";
+      if (ep.name.includes("🏛️") || ep.name.includes("Homepage")) icon = "🏛️";
+      else if (ep.name.includes("👨‍🏫") || ep.name.includes("Supervisor") || ep.name.includes("导师")) icon = "👨‍🏫";
+      else if (ep.name.includes("🎓") || ep.name.includes("Department") || ep.name.includes("学院")) icon = "🎓";
+      return `
+        <div class="endpoint-chip-item">
+          <span class="badge version">${icon} ${ep.name}</span>
+          <a href="${ep.url}" target="_blank" title="${ep.url}">${ep.url} ↗</a>
+        </div>
+      `;
+    }).join("") || `<span style="color:var(--text-muted); font-size:0.74rem;">Pending discovery</span>`;
+
+    // Smart Action Button based on live Step 1 (Homepage) & Step 2 (Department) status
+    const st = u.pipeline_status || "Pending Live Check";
+    const reasonTip = escapeAttr(u.status_reason || "");
+    let actionBtnHtml = `<button class="btn btn-secondary btn-sm btn-interactive" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Live-probe Step 1 Homepage & Step 2 CS/AI Department">🧭 Verify & Find Dept</button>`;
+    if (st === "Faculty Page Found" || st === "Department URL Found" || st === "Professor Extraction Completed") {
+      actionBtnHtml = `<button class="btn btn-success btn-sm btn-interactive" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Step 1 & Step 2 Verified! (${reasonTip}) Click to re-verify.">✓ Verified (↻)</button>`;
+    } else if (st === "Homepage OK · Dept Not Found" || st === "Department URL Not Found") {
+      actionBtnHtml = `<button class="btn btn-secondary btn-sm btn-interactive" style="border-color:#f59e0b; color:#b45309;" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Step 1 Homepage OK, Step 2 Dept Missing: ${reasonTip} — Click to retry Step 2.">🧭 Retry Step 2 (Dept)</button>`;
+    } else if (st === "Step 1 Failed: Homepage Unreachable" || st === "Requires Manual Review") {
+      actionBtnHtml = `<button class="btn btn-danger btn-sm btn-interactive" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Step 1 Failed: ${reasonTip} — Click to retry.">↻ Retry Step 1 & 2</button>`;
+    }
 
     tr.innerHTML = `
       <td class="col-num">${idx + 1}</td>
-      <td><strong>${u.name}</strong></td>
-      <td class="col-native"><span style="color: var(--text-secondary);">${u.chinese_name || "-"}</span></td>
+      <td>
+        <div><strong>${u.name}</strong></div>
+        <div style="color: var(--text-secondary); font-size: 0.74rem;">${u.chinese_name || "-"}</div>
+      </td>
       <td class="col-region"><span class="badge ${getRegionBadgeClass(u.region)}">${u.region || "National"}</span></td>
       <td class="col-tier"><span class="badge ${getTierBadgeClass(u.tier)}">${u.tier || "Tier 3 (Safety)"}</span></td>
-      <td class="col-status">${getPipelineStatusBadge(u.pipeline_status)}</td>
-      <td>${endpointsHtml}</td>
-      <td class="col-action">
-        <button class="btn btn-secondary btn-sm btn-interactive" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Live-probe homepage (院系设置) & WAF fallback to find real CS/AI department & supervisor page">🧭 Verify & Find Dept</button>
-      </td>
+      <td class="col-status">${getPipelineStatusBadge(u.pipeline_status, u.status_reason)}</td>
+      <td><div class="endpoint-chips-list">${endpointsHtml}</div></td>
+      <td class="col-action">${actionBtnHtml}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -724,7 +897,11 @@ async function resolveSingleUniversityDept(domain, btnEl) {
       const idx = lastDiscoveredUniversities.findIndex(u => u.domain === domain);
       if (idx !== -1) lastDiscoveredUniversities[idx] = updated;
       const eps = (updated.department_endpoints || []).map(e => `${e.name}: ${e.url}`).join(" | ");
-      pushInlineLog("SUCCESS", "HomepageCrawler", `[${updated.name}] ✓ Live Status: ${updated.pipeline_status} -> ${eps}`);
+      pushInlineLog(
+        updated.pipeline_status.includes("Found") ? "SUCCESS" : "WARNING",
+        "HomepageCrawler",
+        `[${updated.name}] -> ${updated.pipeline_status} (${updated.status_reason || ""}) | ${eps}`
+      );
       applyPortalsTableFilter();
       loadUniversities();
     }
@@ -734,62 +911,141 @@ async function resolveSingleUniversityDept(domain, btnEl) {
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.classList.remove("btn-loading");
-      btnEl.textContent = "🧭 Verify & Find Dept";
     }
   }
 }
 
-async function resolveRealDepartmentsForVisible(triggerBtn = null) {
-  const targets = (filteredPortalUniversities && filteredPortalUniversities.length > 0)
-    ? filteredPortalUniversities.slice(0, 15)
-    : (lastDiscoveredUniversities || []).slice(0, 15);
+let isBatchResolving = false;
+let stopBatchResolveRequested = false;
 
-  if (targets.length === 0) {
-    alert("Run discovery first so there are universities to resolve.");
+async function resolveRealDepartmentsForVisible(triggerBtn = null) {
+  const btn = triggerBtn || document.getElementById("btn-resolve-depts");
+
+  if (isBatchResolving) {
+    stopBatchResolveRequested = true;
+    if (btn) btn.textContent = "⏳ Stopping after current...";
     return;
   }
 
-  const btn = triggerBtn || document.getElementById("btn-resolve-depts");
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add("btn-loading");
-    btn.textContent = `⏳ Live-Probing ${targets.length} Homepages...`;
+  const univVal = document.getElementById("portal-univ-filter")?.value || "All";
+  const regionVal = document.getElementById("portal-region-filter")?.value || "All";
+  const tierVal = document.getElementById("portal-tier-filter")?.value || "All";
+
+  const baseList = (filteredPortalUniversities && filteredPortalUniversities.length > 0)
+    ? filteredPortalUniversities
+    : (lastDiscoveredUniversities || []);
+
+  if (baseList.length === 0) {
+    alert("No universities match the current filters. Adjust your filters or run discovery first.");
+    return;
   }
 
-  startProgressAnimation("HOMEPAGE-FIRST DISCOVERY", `Live-probing ${targets.length} university homepages ('院系设置' -> CS/AI -> '导师队伍')...`);
-  pushInlineLog("INFO", "BatchResolver", `Starting Live Homepage & WAF-Fallback Department Discovery for ${targets.length} universities...`);
+  // Scoped worker targets based on Region, Tier, and Specific University filters
+  let targets = [];
+  if (univVal !== "All") {
+    // If a specific university is chosen, target it directly even if already probed
+    targets = baseList.filter(u => u.domain === univVal);
+  } else {
+    // Only probe unverified universities in the active filtered slice
+    targets = baseList.filter(u =>
+      u.pipeline_status !== "Faculty Page Found" &&
+      u.pipeline_status !== "Department URL Found" &&
+      u.pipeline_status !== "Professor Extraction Completed"
+    );
+  }
+
+  if (targets.length === 0) {
+    const filterDesc = [
+      regionVal !== "All" ? `Region: ${regionVal}` : null,
+      tierVal !== "All" ? `Tier: ${tierVal}` : null,
+      univVal !== "All" ? `University: ${univVal}` : null
+    ].filter(Boolean).join(" | ") || "All Universities";
+    alert(`All universities in the selected filter (${filterDesc}) already have verified department links!`);
+    return;
+  }
+
+  isBatchResolving = true;
+  stopBatchResolveRequested = false;
+
+  const workerSelect = document.getElementById("portal-probe-workers");
+  const workerCount = Math.min(3, Math.max(1, parseInt(workerSelect ? workerSelect.value : "3", 10) || 3));
+
+  if (btn) {
+    btn.classList.add("btn-loading");
+    btn.textContent = `⏹ Stop (0/${targets.length} Probed | ${workerCount}W)`;
+  }
+
+  startProgressAnimation("HOMEPAGE-FIRST DISCOVERY", `Live-probing ${targets.length} unverified university homepages using ${workerCount} parallel worker(s)...`);
+  pushInlineLog("INFO", "BatchResolver", `🚀 Starting Live Homepage & WAF-Fallback Department Discovery across ${targets.length} unverified universities with ${workerCount} parallel worker(s) (skipping ${baseList.length - targets.length} already-verified)...`);
 
   const discipline = document.getElementById("filter-discipline")?.value || "Computer Science";
   let done = 0;
 
-  for (const u of targets) {
-    done++;
-    const pct = Math.round((done / targets.length) * 100);
-    updateProgressStage(pct, `LIVE PROBING (${done}/${targets.length})`, `Inspecting ${u.name} (${u.website || u.domain})...`, `Checking 200 OK / Playwright WAF -> 院系设置 -> ${discipline}`);
+  for (let i = 0; i < targets.length; i += workerCount) {
+    if (stopBatchResolveRequested) {
+      pushInlineLog("WARNING", "BatchResolver", `⏸ Batch resolution paused by operator at ${done}/${targets.length} universities.`);
+      break;
+    }
+
+    const chunk = targets.slice(i, i + workerCount);
+    const chunkDomains = chunk.map(u => u.domain);
+    const chunkNames = chunk.map(u => u.name).join(", ");
+    const pct = Math.max(3, Math.round((done / targets.length) * 100));
+
+    if (btn) btn.textContent = `⏹ Stop (${done}/${targets.length} Probed | ${workerCount}W)`;
+    updateProgressStage(
+      pct,
+      `LIVE PROBING (${done}/${targets.length} | ${workerCount} WORKERS)`,
+      `Parallel batch (${done + 1}–${Math.min(done + chunk.length, targets.length)} of ${targets.length}): ${chunkNames}`,
+      `Checking 200 OK / Playwright WAF -> 院系设置 -> ${discipline} -> Saving to MongoDB`
+    );
+
     try {
       const res = await fetchWithAuth("/api/v1/discovery/resolve-departments", {
         method: "POST",
-        body: JSON.stringify({ domains: [u.domain], discipline: discipline })
+        body: JSON.stringify({
+          domains: chunkDomains,
+          discipline: discipline,
+          max_workers: workerCount
+        })
       });
       const updatedList = await res.json();
-      if (updatedList && updatedList.length > 0) {
-        const updated = updatedList[0];
-        const idx = lastDiscoveredUniversities.findIndex(item => item.domain === u.domain);
-        if (idx !== -1) lastDiscoveredUniversities[idx] = updated;
-        const epText = (updated.department_endpoints || []).map(e => `${e.name} (${e.url})`).join(", ");
-        pushInlineLog(
-          updated.pipeline_status.includes("Found") || updated.pipeline_status.includes("Verified") ? "SUCCESS" : "WARNING",
-          "HomepageCrawler",
-          `[${done}/${targets.length}] [${updated.name}] -> ${updated.pipeline_status} | ${epText}`
-        );
+      if (Array.isArray(updatedList)) {
+        updatedList.forEach(updated => {
+          done++;
+          const idx = lastDiscoveredUniversities.findIndex(item => item.domain === updated.domain);
+          if (idx !== -1) lastDiscoveredUniversities[idx] = updated;
+          const epText = (updated.department_endpoints || []).map(e => `${e.name} (${e.url})`).join(" | ");
+          const st = updated.pipeline_status || "";
+          const logLevel = st.includes("Found") ? "SUCCESS" : (st.includes("Homepage OK") ? "INFO" : "WARNING");
+          const stepSummary = st.includes("Found")
+            ? "[Step 1: Homepage OK ✓ | Step 2: CS/AI Dept Found ✓]"
+            : (st.includes("Homepage OK")
+                ? "[Step 1: Homepage OK ✓ | Step 2: Dept Link Not Found ⚠]"
+                : "[Step 1: Homepage Unreachable ✗]");
+          pushInlineLog(
+            logLevel,
+            "HomepageCrawler",
+            `[${done}/${targets.length}] [${updated.name}] ${stepSummary} -> ${updated.status_reason || st} | ${epText}`
+          );
+        });
       }
     } catch (e) {
-      pushInlineLog("ERROR", "HomepageCrawler", `[${done}/${targets.length}] [${u.name}] Failed: ${e}`);
+      const errMsg = String(e || "");
+      if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
+        pushInlineLog("ERROR", "BatchResolver", `⏸ Backend server connection lost (${errMsg}). Automatically paused batch at ${done}/${targets.length} so remaining universities are not skipped!`);
+        stopProgressAnimation(false, `Paused at ${done}/${targets.length}: Backend server offline (Failed to fetch). Restart server and click 🧭 Resolve Real Dept Links to resume.`);
+        break;
+      }
+      done += chunk.length;
+      pushInlineLog("ERROR", "HomepageCrawler", `[Batch ${done}/${targets.length}] (${chunkNames}) Failed: ${e}`);
     }
     applyPortalsTableFilter();
   }
 
-  stopProgressAnimation(true, `Completed Homepage-First Department Resolution for ${targets.length} universities.`);
+  isBatchResolving = false;
+  stopBatchResolveRequested = false;
+  stopProgressAnimation(true, `Completed Homepage-First Department Resolution (${done}/${targets.length} probed with ${workerCount} parallel workers, persisted to MongoDB).`);
   loadUniversities();
   if (btn) {
     btn.disabled = false;
@@ -916,25 +1172,28 @@ async function runRegionalFilter(triggerBtn = null) {
   pushInlineLog("INFO", "Discovery", `Executing ${activeSourceLabel} query (Regions: ${selectedRegions.join(", ")}, Tier: ${tier}, Keyword: ${keyword || "None"})...`);
 
   try {
-    updateProgressStage(45, "STAGE 2: FILTER & DEDUP", "Filtering Master's-granting .edu.cn domains & excluding 3-year vocational colleges...", "Cross-checking MOE Project 985, 211 & Master's registries");
+    updateProgressStage(35, "STAGE 1: RAW MULTI-SOURCE QUERY", `Fetching raw datasets from ${activeSourceLabel}...`, `Source: ${activeSourceLabel} | Regions: ${selectedRegions.join(", ")}`);
 
     const res = await fetchWithAuth("/api/v1/discovery/filter", {
       method: "POST",
       body: JSON.stringify(payload)
     });
     
-    updateProgressStage(85, "STAGE 3: PERSISTING PORTALS", "Attaching candidate homepages (Pending Live Check) & syncing MongoDB...", "Syncing Feasibility Matrix");
+    updateProgressStage(75, "STAGE 2: NORMALIZING & SAVING TO MONGODB", "Deduplicating raw MOE/Wikidata records, saving raw audit + normalized universities to MongoDB...", "Writing to autoadmit.universities & autoadmit.discovery_runs");
 
     const universities = await res.json();
     lastDiscoveredUniversities = universities;
+
+    updateProgressStage(92, "STAGE 3: READING FROM MONGODB TO UI", "Loading persisted normalized records and raw multi-source audit from MongoDB...", "Syncing Section 01 Portals & Section 02 Matrix");
 
     const t1 = universities.filter(u => u.tier && u.tier.includes("Tier 1")).length;
     const t2 = universities.filter(u => u.tier && u.tier.includes("Tier 2")).length;
     const t3 = universities.length - t1 - t2;
 
-    pushInlineLog("SUCCESS", "Discovery", `✓ Discovered ${universities.length} Master's-granting .edu.cn universities via ${activeSourceLabel} (Tier 1 Dream: ${t1}, Tier 2 Target: ${t2}, Tier 3 Safety: ${t3}). Status set to Pending Live Check.`);
+    pushInlineLog("SUCCESS", "Discovery", `✓ Discovered & persisted ${universities.length} normalized Master's-granting .edu.cn universities via ${activeSourceLabel} (Tier 1 Dream: ${t1}, Tier 2 Target: ${t2}, Tier 3 Safety: ${t3}). Loaded from MongoDB.`);
 
-    stopProgressAnimation(true, `Successfully discovered ${universities.length} Master's-granting Chinese universities (Tier 1: ${t1}, Tier 2: ${t2}, Tier 3: ${t3}).`);
+    stopProgressAnimation(true, `Successfully discovered & saved ${universities.length} normalized universities via ${activeSourceLabel} (Tier 1: ${t1}, Tier 2: ${t2}, Tier 3: ${t3}).`);
+    await loadLastDiscoveryAudit();
     renderMatchedEndpoints(universities);
     // Automatically sync Section 02 Feasibility & Scholarship Matrix!
     await loadUniversities();
@@ -1277,13 +1536,23 @@ async function loadUniversities(triggerBtn = null) {
     triggerBtn.classList.add("btn-loading");
     triggerBtn.textContent = "⏳ Loading...";
   }
-  renderTableSkeleton("universities-tbody", 10, 8);
+  renderTableSkeleton("universities-tbody", 7, 8);
   try {
     const res = await fetchWithAuth("/api/v1/discovery/universities");
     allDirectoryUniversities = await res.json();
     populateRegionFilterDropdown("matrix-region-filter", allDirectoryUniversities);
     populateSupervisorPoolControls();
+    updateMatrixAnalyticsAndRegions();
     applyMatrixTableFilter();
+
+    // Automatically restore Section 01 (Discovered University Portals) & Raw/Normalized Audit from MongoDB across page refreshes!
+    if (allDirectoryUniversities && allDirectoryUniversities.length > 0) {
+      if (!lastDiscoveredUniversities || lastDiscoveredUniversities.length === 0) {
+        lastDiscoveredUniversities = allDirectoryUniversities;
+        renderMatchedEndpoints(allDirectoryUniversities);
+      }
+      loadLastDiscoveryAudit();
+    }
   } catch (err) {
     console.error("Error loading universities:", err);
   } finally {
@@ -1293,6 +1562,57 @@ async function loadUniversities(triggerBtn = null) {
       triggerBtn.textContent = prevText || "↻ Refresh Directory";
     }
   }
+}
+
+function updateMatrixAnalyticsAndRegions() {
+  const list = allDirectoryUniversities || [];
+  const total = list.length;
+  
+  let hpOk = 0;
+  let deptOk = 0;
+  let pending = 0;
+  const regCounts = {};
+
+  list.forEach(u => {
+    const reg = u.region || "National";
+    regCounts[reg] = (regCounts[reg] || 0) + 1;
+
+    const st = u.pipeline_status || "";
+    const isHpVerified = Boolean(u.website_verified || (st && !st.includes("Pending") && !st.startsWith("Step 1 Failed")));
+    const isDeptFound = Boolean(st === "Faculty Page Found" || st === "Department URL Found" || st === "Professor Extraction Completed");
+
+    if (isHpVerified) hpOk++;
+    if (isDeptFound) deptOk++;
+    if (!isHpVerified || st === "Pending Live Check" || st.startsWith("Step 1 Failed")) pending++;
+  });
+
+  const setT = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setT("matrix-stat-total", total);
+  setT("matrix-stat-hp-ok", hpOk);
+  setT("matrix-stat-hp-pct", total > 0 ? `${Math.round((hpOk / total) * 100)}% verified 200 OK` : "0%");
+  setT("matrix-stat-dept-ok", deptOk);
+  setT("matrix-stat-dept-pct", total > 0 ? `${Math.round((deptOk / total) * 100)}% endpoints resolved` : "0%");
+  setT("matrix-stat-pending", pending);
+
+  // Render regional distribution pills sorted by university count descending
+  const pillsWrap = document.getElementById("matrix-region-pills");
+  if (pillsWrap) {
+    const sortedRegions = Object.keys(regCounts).sort((a, b) => regCounts[b] - regCounts[a]);
+    const currentFilter = document.getElementById("matrix-region-filter")?.value || "All";
+    
+    pillsWrap.innerHTML = sortedRegions.map(r => {
+      const isActive = (r === currentFilter) ? "active" : "";
+      return `<button class="region-pill ${isActive}" onclick="filterMatrixByRegion('${escapeAttr(r)}')">${r} <span class="pill-count">${regCounts[r]}</span></button>`;
+    }).join("");
+  }
+}
+
+function filterMatrixByRegion(region) {
+  const sel = document.getElementById("matrix-region-filter");
+  if (sel) {
+    sel.value = region;
+  }
+  applyMatrixTableFilter();
 }
 
 function scrollToSupervisorPool() {
@@ -1399,7 +1719,7 @@ async function launchSupervisorWorkerPool() {
 
   const selectedReg = regSelect ? regSelect.value : "All";
   const selectedTier = tierSelect ? tierSelect.value : "All";
-  const workerCount = parseInt(workerSelect ? workerSelect.value : "5", 10) || 5;
+  const workerCount = Math.min(3, Math.max(1, parseInt(workerSelect ? workerSelect.value : "3", 10) || 3));
   const discipline = discSelect ? discSelect.value : "Computer Science";
 
   const sourceList = (allDirectoryUniversities && allDirectoryUniversities.length > 0)
@@ -1484,6 +1804,11 @@ async function launchSupervisorWorkerPool() {
         if (progStats) progStats.textContent = `${totalHarvestedCount} New Supervisors Found`;
       }
     } catch (err) {
+      const errStr = String(err || "");
+      if (errStr.includes("Failed to fetch") || errStr.includes("NetworkError")) {
+        pushInlineLog("ERROR", "WorkerPool", `⏸ Backend server connection lost (${errStr}). Paused supervisor extraction at ${completedUnivs}/${totalUnivs}.`);
+        break;
+      }
       pushInlineLog("ERROR", "WorkerPool", `Batch worker error on (${chunkNames}): ${err}`);
     }
 
@@ -1519,12 +1844,23 @@ function applyMatrixTableFilter() {
   const tierVal = document.getElementById("matrix-tier-filter")?.value || "All";
   const sortVal = document.getElementById("matrix-sort-select")?.value || "region-asc";
 
+  // Sync active state on regional pills
+  const pills = document.querySelectorAll("#matrix-region-pills .region-pill");
+  pills.forEach(p => {
+    const pillReg = p.textContent.split(" ")[0].trim();
+    if (pillReg === regionVal || (regionVal === "All" && pillReg === "All")) {
+      p.classList.add("active");
+    } else {
+      p.classList.remove("active");
+    }
+  });
+
   if (!allDirectoryUniversities || allDirectoryUniversities.length === 0) {
     const countEl = document.getElementById("matrix-univ-count");
     if (countEl) countEl.textContent = "0";
     tbody.innerHTML = `
       <tr>
-        <td colspan="10" class="empty-state-cell">
+        <td colspan="7" class="empty-state-cell">
           <div class="empty-state">
             <span class="empty-icon">🏛️</span>
             <h4>Database Directory Empty</h4>
@@ -1560,7 +1896,7 @@ function applyMatrixTableFilter() {
     if (showLbl) showLbl.textContent = "Showing 0 rows";
     tbody.innerHTML = `
       <tr>
-        <td colspan="10" class="empty-state-cell">
+        <td colspan="7" class="empty-state-cell">
           <div class="empty-state">
             <span class="empty-icon">🔎</span>
             <h4>No Matching Records</h4>
@@ -1572,27 +1908,31 @@ function applyMatrixTableFilter() {
     return;
   }
 
-  const limit = tableRowLimits.matrix || 10;
+  const limit = tableRowLimits.matrix || 9999;
   const visibleRows = filtered.slice(0, limit);
   const showLbl = document.getElementById("matrix-showing-label");
   if (showLbl) {
-    showLbl.textContent = `Showing ${visibleRows.length} of ${filtered.length} rows`;
+    const viewportRows = tableVisibleRowsConfig.matrix || 10;
+    showLbl.textContent = `Viewport: ~${viewportRows} visible rows | Scrollable: ${visibleRows.length} rows`;
   }
 
   visibleRows.forEach((u, idx) => {
     const tr = document.createElement("tr");
 
-    // Accurate National Classification (Never fake 'Top 50'!)
-    let natClassHtml = `<span class="badge badge-region-default">Provincial Accredited</span>`;
-    if (u.cs_ranking) {
-      natClassHtml = `<span class="badge badge-tier-1">CS Rank #${u.cs_ranking}</span>`;
-    } else if (u.is_project_985) {
-      natClassHtml = `<span class="badge badge-tier-1">Project 985 / C9 Elite</span>`;
+    // Unified National Classification & Competitiveness Note
+    let natClassHtml = `<span class="badge badge-region-default">Provincial Key</span>`;
+    let compNote = "Accredited Master's institution";
+    if (u.is_project_985) {
+      natClassHtml = `<span class="badge badge-tier-1">Project 985 / C9</span>`;
+      compNote = "High competition · Elite research labs";
     } else if (u.is_project_211) {
-      natClassHtml = `<span class="badge badge-tier-2">Project 211 / Key Nat.</span>`;
+      natClassHtml = `<span class="badge badge-tier-2">Project 211 / Double First-Class</span>`;
+      compNote = "Strong quota · Key national engineering";
+    } else {
+      compNote = "High acceptance flexibility";
     }
 
-    // Accurate Application Fee (0 RMB Waived only if verified; otherwise 400-800 RMB Standard Est.)
+    // Accurate Application Fee
     let feeHtml = `<span class="badge badge-fee-standard" title="Most Chinese universities charge 400–800 RMB processing fee unless waived via CSC or university policy">${u.fee_note || "400–800 RMB (Standard Est.)"}</span>`;
     if (u.application_fee_rmb === 0) {
       feeHtml = `<span class="badge badge-fee-waived">0 RMB (Fee Waived)</span>`;
@@ -1602,19 +1942,50 @@ function applyMatrixTableFilter() {
 
     const officialSite = u.website || `https://www.${u.domain}/`;
 
+    // Gathered Specific Department/Supervisor Links Displayed Clearly Alongside Root
+    const endpointsListHtml = (u.department_endpoints || []).map(ep => {
+      let icon = "🌐";
+      if (ep.name.includes("🏛️") || ep.name.includes("Homepage")) icon = "🏛️";
+      else if (ep.name.includes("👨‍🏫") || ep.name.includes("Supervisor") || ep.name.includes("导师")) icon = "👨‍🏫";
+      else if (ep.name.includes("🎓") || ep.name.includes("Department") || ep.name.includes("学院")) icon = "🎓";
+      return `
+        <div class="endpoint-chip-item">
+          <span class="badge version">${icon} ${ep.name}</span>
+          <a href="${ep.url}" target="_blank" title="${ep.url}">${ep.url} ↗</a>
+        </div>
+      `;
+    }).join("") || `
+      <div class="endpoint-chip-item">
+        <span class="badge version">🏛️ Root</span>
+        <a href="${officialSite}" target="_blank" title="${officialSite}">${u.domain} ↗</a>
+      </div>
+    `;
+
     tr.innerHTML = `
       <td class="col-num">${idx + 1}</td>
-      <td><strong>${u.name}</strong></td>
-      <td class="col-native">${u.chinese_name || "-"}</td>
+      <td>
+        <div><strong>${u.name}</strong></div>
+        <div style="color: var(--text-secondary); font-size: 0.74rem;">${u.chinese_name || "-"}</div>
+      </td>
       <td class="col-region"><span class="badge ${getRegionBadgeClass(u.region)}">${u.region || "National"}</span></td>
-      <td><a href="${officialSite}" target="_blank" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--primary);">${u.domain} ↗</a></td>
-      <td>${natClassHtml}</td>
-      <td class="col-tier"><span class="badge ${getTierBadgeClass(u.tier)}">${u.tier}</span></td>
-      <td style="font-size: 0.75rem;">${(u.scholarships_available || []).join(", ") || "Provincial / Presidential"}</td>
-      <td>${feeHtml}</td>
-      <td style="max-width: 260px; font-size: 0.76rem;">
-        <div style="margin-bottom: 2px;">${getPipelineStatusBadge(u.pipeline_status)}</div>
-        <span style="color: var(--text-secondary);">${u.feasibility_notes || "Accredited institution"}</span>
+      <td>
+        <div class="endpoint-chips-list">
+          ${endpointsListHtml}
+        </div>
+      </td>
+      <td>
+        <div style="display: flex; gap: 0.35rem; align-items: center; margin-bottom: 2px;">
+          <span class="badge ${getTierBadgeClass(u.tier)}">${u.tier || "Tier 3"}</span>
+          ${natClassHtml}
+        </div>
+        <div style="font-size: 0.72rem; color: var(--text-secondary);">${compNote}</div>
+      </td>
+      <td>
+        <div style="margin-bottom: 3px;">${feeHtml}</div>
+        <div style="font-size: 0.72rem; color: var(--text-secondary);">${(u.scholarships_available || []).join(", ") || "Provincial / Presidential"}</div>
+      </td>
+      <td style="max-width: 250px;">
+        <div>${getPipelineStatusBadge(u.pipeline_status, u.status_reason)}</div>
       </td>
     `;
     tbody.appendChild(tr);

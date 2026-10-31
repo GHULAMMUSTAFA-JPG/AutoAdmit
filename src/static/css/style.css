@@ -1449,19 +1449,19 @@ body.enterprise-body {
 .badge-region-default { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 
 /* Pipeline Status Badges */
-.badge-status-pending { background: #f8fafc; color: #64748b; border: 1px dashed #cbd5e1; font-weight: 600; }
-.badge-status-verified { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; }
-.badge-status-dept { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; font-weight: 600; }
-.badge-status-faculty { background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-weight: 700; }
-.badge-status-extracted { background: #d1fae5; color: #065f46; border: 1px solid #34d399; font-weight: 700; }
-.badge-status-missing { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
-.badge-status-manual { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+.badge-status-pending { background: #f8fafc; color: #64748b; border: 1px dashed #cbd5e1; font-weight: 600; cursor: help; }
+.badge-status-verified { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; cursor: help; }
+.badge-status-dept { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; font-weight: 600; cursor: help; }
+.badge-status-faculty { background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-weight: 700; cursor: help; }
+.badge-status-extracted { background: #d1fae5; color: #065f46; border: 1px solid #34d399; font-weight: 700; cursor: help; }
+.badge-status-missing { background: #fee2e2; color: #b91c1c; border: 1px solid #f87171; font-weight: 700; cursor: help; }
+.badge-status-manual { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; font-weight: 700; cursor: help; }
 
 /* Application Fee Badges */
 .badge-fee-waived { background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-weight: 700; }
 .badge-fee-standard { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 
-/* Drag-to-Resize Table Wrapper & Handle */
+/* Explicit Vertical Scroller & Drag-to-Resize Table Wrapper */
 .resizable-table-wrapper {
   position: relative;
   display: flex;
@@ -1469,9 +1469,102 @@ body.enterprise-body {
 }
 
 .resizable-table-wrapper .table-scroll-container {
+  overflow-y: scroll !important;
+  overflow-x: auto !important;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   transition: max-height 0.08s ease-out;
+}
+
+.table-scroll-container::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.table-scroll-container::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 5px;
+  border: 2px solid #f1f5f9;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Collapsible Raw Multi-Source vs. Normalized DB Inspector */
+.audit-collapsible-card {
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.audit-collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  background: linear-gradient(90deg, #f1f5f9 0%, #e0f2fe 100%);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+}
+
+.audit-collapsible-header:hover {
+  background: linear-gradient(90deg, #e2e8f0 0%, #bae6fd 100%);
+}
+
+.audit-header-left, .audit-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.audit-chevron {
+  font-size: 0.75rem;
+  color: var(--primary);
+  transition: transform 0.2s ease;
+}
+
+.audit-arrow {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.audit-collapsible-body {
+  padding: 0.85rem 1rem;
+  border-top: 1px solid #cbd5e1;
+  background: #ffffff;
+}
+
+.audit-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 0.5rem;
+}
+
+.audit-metric-pill {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.76rem;
+}
+
+.metric-lbl {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .table-resize-handle {
@@ -1553,6 +1646,130 @@ body.enterprise-body {
   background-size: 200% 100% !important;
   animation: skeleton-shimmer 1.2s infinite linear !important;
 }
+
+/* Compact Table Density & Space Optimization */
+.enterprise-table.compact-table thead th {
+  padding: 0.5rem 0.65rem !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.03em;
+}
+
+.enterprise-table.compact-table tbody td {
+  padding: 0.45rem 0.65rem !important;
+  font-size: 0.78rem !important;
+  line-height: 1.35;
+}
+
+/* Analytics Panel & Regional Distribution */
+.matrix-analytics-panel {
+  background: #fdfefe;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+}
+
+.regional-distribution-box {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.75rem;
+}
+
+.dist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dist-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.region-pills-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-height: 90px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.region-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.region-pill:hover {
+  background: #e2e8f0;
+  color: var(--text-primary);
+  border-color: #cbd5e1;
+}
+
+.region-pill.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.region-pill .pill-count {
+  background: rgba(0, 0, 0, 0.08);
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+}
+
+.region-pill.active .pill-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* Gathered Department & Supervisor Endpoint Chips in Table Rows */
+.endpoint-chips-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 320px;
+}
+
+.endpoint-chip-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.endpoint-chip-item a {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--primary);
+  text-decoration: underline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.endpoint-chip-item a:hover {
+  color: var(--primary-hover);
+}
+
 
 
 

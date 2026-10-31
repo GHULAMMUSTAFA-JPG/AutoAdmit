@@ -256,8 +256,73 @@
             </div>
           </div>
 
+          <!-- Collapsible Raw Multi-Source vs. Normalized DB Inspector (Persistent across Refresh) -->
+          <div id="discovery-audit-box" class="audit-collapsible-card mt-3 hidden">
+            <div class="audit-collapsible-header" onclick="toggleDiscoveryAuditPanel()">
+              <div class="audit-header-left">
+                <span id="audit-chevron" class="audit-chevron">▶</span>
+                <span class="badge badge-primary">PIPELINE LINEAGE</span>
+                <strong id="audit-summary-title">Multi-Source Raw Intake → Normalized MongoDB Persistence</strong>
+              </div>
+              <div class="audit-header-badges">
+                <span id="audit-badge-raw" class="badge badge-region-north">0 Raw Records</span>
+                <span class="audit-arrow">➔</span>
+                <span id="audit-badge-filtered" class="badge badge-status-missing">0 Excluded/Merged</span>
+                <span class="audit-arrow">➔</span>
+                <span id="audit-badge-norm" class="badge badge-status-faculty">0 Normalized in DB</span>
+                <button class="btn btn-secondary btn-sm ml-2" onclick="event.stopPropagation(); toggleDiscoveryAuditPanel()">📂 Open / Close Raw Data</button>
+              </div>
+            </div>
+            <div id="discovery-audit-body" class="audit-collapsible-body hidden">
+              <div class="audit-metrics-row">
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">1. China MOE Master's Raw:</span>
+                  <strong id="audit-moe-count">0</strong>
+                </div>
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">2. Wikidata SPARQL Raw:</span>
+                  <strong id="audit-wd-count">0</strong>
+                </div>
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">3. Rejected Non-.edu.cn:</span>
+                  <strong id="audit-non-edu-count" style="color: #dc2626;">0</strong>
+                </div>
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">4. Excluded 3-Yr Vocational (专科/职业):</span>
+                  <strong id="audit-voc-count" style="color: #d97706;">0</strong>
+                </div>
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">5. Cross-Source Duplicates Merged:</span>
+                  <strong id="audit-dup-count" style="color: #2563eb;">0</strong>
+                </div>
+                <div class="audit-metric-pill">
+                  <span class="metric-lbl">6. Final Normalized in MongoDB:</span>
+                  <strong id="audit-final-count" style="color: #15803d;">0</strong>
+                </div>
+              </div>
+              <div class="table-scroll-container mt-2" style="max-height: 260px;">
+                <table class="enterprise-table compact-table">
+                  <thead>
+                    <tr>
+                      <th class="col-num">#</th>
+                      <th>Raw Source Origin</th>
+                      <th>Source ID</th>
+                      <th>Raw English Name</th>
+                      <th>Raw Chinese Name</th>
+                      <th>Raw Website URL</th>
+                      <th>Normalization & DB Decision</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-raw-tbody">
+                    <!-- Populated from /api/v1/discovery/last-audit -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           <!-- Discovered Universities Table & Live Logs Toggle Container -->
-          <div id="discovered-endpoints-container" class="results-container mt-4 hidden">
+          <div id="discovered-endpoints-container" class="results-container mt-3 hidden">
             <div class="table-action-header">
               <div class="header-meta">
                 <h3>Discovered University Portals (<span id="matched-univ-count" class="highlight-count">0</span> Institutions)</h3>
@@ -268,7 +333,12 @@
                   <button id="btn-view-portals-table" class="btn-view-toggle active" onclick="switchPortalsView('table')">📊 Data Table</button>
                   <button id="btn-view-portals-logs" class="btn-view-toggle" onclick="switchPortalsView('logs')">📜 Live Extraction Logs (<span id="live-log-counter">0</span>)</button>
                 </div>
-                <button id="btn-resolve-depts" class="btn btn-primary btn-sm btn-interactive" onclick="resolveRealDepartmentsForVisible(this)" title="Crawls verified homepages (院系设置) to find real CS/AI department & supervisor URLs">🧭 Resolve Real Dept Links</button>
+                <select id="portal-probe-workers" class="form-control form-control-sm" style="width: auto; font-size: 0.78rem; padding: 0.25rem 0.5rem;" title="Number of parallel workers for Live Homepage & Department Probing (Max 3 to protect CPU & RAM)">
+                  <option value="1">1 Worker</option>
+                  <option value="2">2 Workers</option>
+                  <option value="3" selected>3 Workers (Recommended)</option>
+                </select>
+                <button id="btn-resolve-depts" class="btn btn-primary btn-sm btn-interactive" onclick="resolveRealDepartmentsForVisible(this)" title="Crawls verified homepages (院系设置) in parallel to find real CS/AI department & supervisor URLs">🧭 Resolve Real Dept Links</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="runRegionalFilter(this)">↻ Refresh</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="clearDiscoveredUniversities()">Clear</button>
                 <button class="btn btn-success btn-sm btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Step 03: Harvest Supervisors ➔</button>
@@ -281,16 +351,21 @@
                 <input type="text" id="portal-search-input" class="form-control form-control-sm" placeholder="🔎 Filter table by university name, Chinese name, or domain..." oninput="applyPortalsTableFilter()" />
               </div>
               <div class="toolbar-item">
-                <select id="portal-region-filter" class="form-control form-control-sm" onchange="applyPortalsTableFilter()">
+                <select id="portal-region-filter" class="form-control form-control-sm" onchange="onPortalRegionOrTierChange()">
                   <option value="All">All Regions</option>
                 </select>
               </div>
               <div class="toolbar-item">
-                <select id="portal-tier-filter" class="form-control form-control-sm" onchange="applyPortalsTableFilter()">
+                <select id="portal-tier-filter" class="form-control form-control-sm" onchange="onPortalRegionOrTierChange()">
                   <option value="All">All Tiers</option>
                   <option value="Tier 1 (Dream)">Tier 1 (Dream - 985)</option>
                   <option value="Tier 2 (Target)">Tier 2 (Target - 211)</option>
                   <option value="Tier 3 (Safety)">Tier 3 (Safety)</option>
+                </select>
+              </div>
+              <div class="toolbar-item" style="max-width: 220px;">
+                <select id="portal-univ-filter" class="form-control form-control-sm" onchange="applyPortalsTableFilter()" title="Select a specific university to target">
+                  <option value="All">All Universities</option>
                 </select>
               </div>
               <div class="toolbar-item">
@@ -320,12 +395,11 @@
                   <thead>
                     <tr>
                       <th class="col-num">#</th>
-                      <th class="sortable-th" onclick="setPortalsSort('name-asc')">University Name ⇅</th>
-                      <th class="col-native">Native Name</th>
+                      <th class="sortable-th" onclick="setPortalsSort('name-asc')">University & Native Name ⇅</th>
                       <th class="sortable-th col-region" onclick="setPortalsSort('region-asc')">Region ⇅</th>
                       <th class="sortable-th col-tier" onclick="setPortalsSort('tier-asc')">Tier ⇅</th>
                       <th class="sortable-th col-status" onclick="setPortalsSort('status-asc')">Live Status ⇅</th>
-                      <th>Official Homepage & Department Endpoints</th>
+                      <th>Official Root & Gathered Endpoints</th>
                       <th class="col-action">Action</th>
                     </tr>
                   </thead>
@@ -385,6 +459,43 @@
             <p class="subtitle">Indexed institutions categorized into Tier 1 Dream (Project 985/C9), Tier 2 Target (Project 211), and Tier 3 Safety. Stored persistently in MongoDB. Next step: launch parallel supervisor crawler workers in Section 03 below.</p>
           </div>
 
+          <!-- Live Interactive Analytics Cards for Indexed Institutions -->
+          <div id="matrix-analytics-container" class="matrix-analytics-panel mt-3">
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <span class="metric-label">🏛️ Indexed Institutions</span>
+                <span id="matrix-stat-total" class="metric-val">0</span>
+                <span class="metric-subnote">Accredited Master's-Granting</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">🌐 Step 1: Homepage Verified</span>
+                <span id="matrix-stat-hp-ok" class="metric-val highlight-green">0</span>
+                <span id="matrix-stat-hp-pct" class="metric-subnote">0% live 200 OK verified</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">🎓 Step 2: Dept & Rosters Found</span>
+                <span id="matrix-stat-dept-ok" class="metric-val highlight-count">0</span>
+                <span id="matrix-stat-dept-pct" class="metric-subnote">0% CS/AI endpoints resolved</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">⚠️ Step 1: Pending / Offline</span>
+                <span id="matrix-stat-pending" class="metric-val" style="color: #f59e0b;">0</span>
+                <span class="metric-subnote">Pending live probe or offline</span>
+              </div>
+            </div>
+
+            <!-- Regional Distribution Interactive Filter Bar -->
+            <div class="regional-distribution-box mt-3">
+              <div class="dist-header">
+                <span class="dist-title">📍 Regional Distribution Breakdown (Click any region to filter directory):</span>
+                <button class="btn btn-secondary btn-sm" onclick="filterMatrixByRegion('All')">Show All Regions</button>
+              </div>
+              <div id="matrix-region-pills" class="region-pills-wrap mt-2">
+                <!-- Dynamically populated region count pills -->
+              </div>
+            </div>
+          </div>
+
           <!-- Live Filter & Sort Toolbar for Section 02 Matrix -->
           <div id="matrix-filter-toolbar" class="table-toolbar mt-3">
             <div class="toolbar-item toolbar-search">
@@ -409,6 +520,7 @@
                 <option value="region-desc">Sort: Region (Z → A)</option>
                 <option value="tier-asc">Sort: Tier (Dream → Safety)</option>
                 <option value="name-asc">Sort: University Name (A → Z)</option>
+                <option value="status-asc">Sort: Verification Status</option>
                 <option value="fee-asc">Sort: Application Fee (Waived First)</option>
               </select>
             </div>
@@ -430,15 +542,12 @@
                 <thead>
                   <tr>
                     <th class="col-num">#</th>
-                    <th class="sortable-th" onclick="setMatrixSort('name-asc')">University Name ⇅</th>
-                    <th class="col-native">Native Name</th>
+                    <th class="sortable-th" onclick="setMatrixSort('name-asc')">University & Native Name ⇅</th>
                     <th class="sortable-th col-region" onclick="setMatrixSort('region-asc')">Region ⇅</th>
-                    <th>Official Domain</th>
-                    <th>National Classification</th>
-                    <th class="sortable-th col-tier" onclick="setMatrixSort('tier-asc')">Feasibility Tier ⇅</th>
-                    <th>Available Scholarships</th>
-                    <th class="sortable-th" onclick="setMatrixSort('fee-asc')">Application Fee ⇅</th>
-                    <th>Live Status & Strategy</th>
+                    <th>Official Domain & Gathered Endpoints</th>
+                    <th class="sortable-th col-tier" onclick="setMatrixSort('tier-asc')">Tier & Classification ⇅</th>
+                    <th class="sortable-th" onclick="setMatrixSort('fee-asc')">Scholarships & Fee ⇅</th>
+                    <th class="sortable-th" onclick="setMatrixSort('status-asc')">Live Verification Status ⇅</th>
                   </tr>
                 </thead>
                 <tbody id="universities-tbody">
@@ -525,12 +634,8 @@
                   <label for="sup-worker-count">3. Parallel Crawler Workers (At Once):</label>
                   <select id="sup-worker-count" class="form-control mt-1">
                     <option value="1">1 Worker (Sequential / Diagnostic)</option>
-                    <option value="3">3 Workers (Light Concurrency)</option>
-                    <option value="5" selected>5 Workers (Recommended Balanced Pool)</option>
-                    <option value="8">8 Workers (Fast Regional Crawl)</option>
-                    <option value="10">10 Workers (High-Speed Parallel)</option>
-                    <option value="15">15 Workers (Heavy Batch Pool)</option>
-                    <option value="20">20 Workers (Maximum Concurrency)</option>
+                    <option value="2">2 Workers (Light Concurrency)</option>
+                    <option value="3" selected>3 Workers (Recommended Balanced Pool)</option>
                   </select>
 
                   <label for="sup-discipline-select" class="mt-2">Target Department Discipline:</label>

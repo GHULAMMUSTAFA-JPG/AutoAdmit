@@ -36,7 +36,7 @@ class UniversityHarvestItem(BaseModel):
 
 class BatchHarvestRequest(BaseModel):
     targets: List[UniversityHarvestItem]
-    max_workers: int = 5
+    max_workers: int = 3
     auto_resolve_homepage: bool = True
     discipline: str = "Computer Science"
 
@@ -167,7 +167,7 @@ async def harvest_batch_faculty(
     from src.services.discovery import discovery_engine
 
     all_extracted: List[FacultyProfile] = []
-    worker_count = max(1, min(request.max_workers, 25))
+    worker_count = max(1, min(request.max_workers, 3))
     univ_sem = asyncio.Semaphore(worker_count)
 
     total_targets = len(request.targets)
@@ -190,12 +190,19 @@ async def harvest_batch_faculty(
                         univ_obj = discovery_engine.assess_university(target.domain, target.university_name)
                         resolved_u = await discovery_engine.resolve_department_from_homepage(univ_obj, request.discipline)
                         if resolved_u.department_endpoints:
-                            urls_to_crawl = [ep.url for ep in resolved_u.department_endpoints]
+                            dept_only = [
+                                ep.url for ep in resolved_u.department_endpoints
+                                if ep.status in ("Faculty Page Found", "Department URL Found")
+                            ]
+                            urls_to_crawl = dept_only if dept_only else [ep.url for ep in resolved_u.department_endpoints]
                         if db_manager.is_connected and db_manager.db is not None:
                             await db_manager.get_collection("universities").update_one(
                                 {"domain": target.domain},
                                 {"$set": {
                                     "pipeline_status": resolved_u.pipeline_status,
+                                    "status_reason": resolved_u.status_reason,
+                                    "website_verified": resolved_u.website_verified,
+                                    "verified_at": resolved_u.verified_at,
                                     "department_endpoints": [ep.model_dump() for ep in resolved_u.department_endpoints]
                                 }}
                             )

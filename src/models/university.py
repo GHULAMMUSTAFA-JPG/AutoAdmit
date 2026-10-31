@@ -45,6 +45,7 @@ class University(BaseModel):
     fee_note: str = Field(default="400–800 RMB (Standard Est.)", description="Realistic application fee guidance")
     feasibility_notes: str = Field(default="")
     pipeline_status: str = Field(default="Pending Live Check", description="Current discovery/extraction status")
+    status_reason: Optional[str] = Field(default="Not live-probed yet. Click 'Verify & Find Dept' or 'Resolve Real Dept Links' to run live check.", description="Detailed diagnostic reason for current pipeline_status")
     department_endpoints: List[DepartmentEndpoint] = Field(default_factory=list)
     website_verified: bool = Field(default=False, description="True only when official site is live-fetched & confirmed")
     verified_at: Optional[datetime] = None
