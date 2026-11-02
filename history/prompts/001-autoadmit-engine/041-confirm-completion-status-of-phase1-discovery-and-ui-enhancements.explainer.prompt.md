@@ -40,3 +40,4 @@ Confirmed all requested implementations across backend discovery, data persisten
    - Interactive Analytics Overview cards and Regional Distribution pills above Table 2.
 3. Phase 1 (P1) discovery engine strengthened with 20+ Chinese higher-ed subdomains, HTTPS/HTTP protocol fallback, discipline-adaptive keyword weighting, multi-nav directory inspection, 25+ supervisor roster designations, and enum-safe BSON serialization.
 4. Clean test execution and Git commit history (`ef24061`).
+
