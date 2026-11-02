@@ -339,6 +339,8 @@
                   <option value="3" selected>3 Workers (Recommended)</option>
                 </select>
                 <button id="btn-resolve-depts" class="btn btn-primary btn-sm btn-interactive" onclick="resolveRealDepartmentsForVisible(this)" title="Crawls verified homepages (院系设置) in parallel to find real CS/AI department & supervisor URLs">🧭 Resolve Real Dept Links</button>
+                <button id="btn-retry-step1-failed" class="btn btn-danger btn-sm btn-interactive" onclick="retryFailedStep1Universities(this)" title="Retries universities where Step 1 Homepage probe failed, timed out, or was blocked by WAF">🔄 Retry Step 1 Failed (<span id="retry-s1-count">0</span>)</button>
+                <button id="btn-retry-step2-missing" class="btn btn-warning btn-sm btn-interactive" onclick="retryMissingStep2Universities(this)" title="Retries universities where Step 1 Homepage succeeded (200 OK) but Step 2 CS/AI department or supervisor roster was not found">🧭 Retry Missing Dept/Roster (<span id="retry-s2-count">0</span>)</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="runRegionalFilter(this)">↻ Refresh</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="clearDiscoveredUniversities()">Clear</button>
                 <button class="btn btn-success btn-sm btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Step 03: Harvest Supervisors ➔</button>
@@ -668,7 +670,8 @@
               </div>
               <div class="tracker-actions">
                 <span id="sup-tracker-stats" class="badge badge-tier-3 mr-2">0 Supervisors Found</span>
-                <button class="btn btn-secondary btn-sm" onclick="switchFacultyView('logs')">📜 View Live Worker Logs</button>
+                <button id="btn-stop-sup-workers" class="btn btn-danger btn-sm ml-1" onclick="stopSupervisorWorkerPool()">⏹ Stop Workers</button>
+                <button class="btn btn-secondary btn-sm ml-1" onclick="switchFacultyView('logs')">📜 View Live Worker Logs</button>
               </div>
             </div>
             <div class="progress-bar-container mt-2">

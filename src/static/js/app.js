@@ -805,6 +805,22 @@ function applyPortalsTableFilter() {
   const countEl = document.getElementById("matched-univ-count");
   if (countEl) countEl.textContent = `${filtered.length} / ${lastDiscoveredUniversities.length}`;
 
+  // Dynamically update Live Count Badges for Step 1 Failed and Step 2 Missing Retry Buttons
+  const s1FailedCount = filtered.filter(u => {
+    const st = u.pipeline_status || "";
+    return st.startsWith("Step 1 Failed") || st === "Requires Manual Review";
+  }).length;
+  const s2MissingCount = filtered.filter(u => {
+    const st = u.pipeline_status || "";
+    return st === "Homepage OK · Dept Not Found" ||
+           st === "Department URL Not Found" ||
+           (st === "Homepage Verified" && (!u.department_endpoints || u.department_endpoints.length <= 1));
+  }).length;
+  const s1El = document.getElementById("retry-s1-count");
+  if (s1El) s1El.textContent = s1FailedCount;
+  const s2El = document.getElementById("retry-s2-count");
+  if (s2El) s2El.textContent = s2MissingCount;
+
   const tbody = document.getElementById("matched-endpoints-tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
@@ -917,13 +933,133 @@ async function resolveSingleUniversityDept(domain, btnEl) {
 
 let isBatchResolving = false;
 let stopBatchResolveRequested = false;
+let currentActiveBatchBtn = null;
+let currentBatchDefaultHtml = "";
 
-async function resolveRealDepartmentsForVisible(triggerBtn = null) {
+async function executeBatchProbe(targets, modeLabel, triggerBtn, defaultHtml, stageTitle) {
   const btn = triggerBtn || document.getElementById("btn-resolve-depts");
 
   if (isBatchResolving) {
     stopBatchResolveRequested = true;
     if (btn) btn.textContent = "⏳ Stopping after current...";
+    if (currentActiveBatchBtn && currentActiveBatchBtn !== btn) {
+      currentActiveBatchBtn.textContent = "⏳ Stopping after current...";
+    }
+    pushInlineLog("WARNING", "BatchResolver", `⏸ Stop requested by operator for ${modeLabel || "Batch Probe"}. Halting after current in-flight batch...`);
+    return;
+  }
+
+  if (!targets || targets.length === 0) {
+    alert(`No universities match the criteria for ${modeLabel || "this action"}.`);
+    return;
+  }
+
+  isBatchResolving = true;
+  stopBatchResolveRequested = false;
+  currentActiveBatchBtn = btn;
+  currentBatchDefaultHtml = defaultHtml;
+
+  const workerSelect = document.getElementById("portal-probe-workers");
+  const workerCount = Math.min(3, Math.max(1, parseInt(workerSelect ? workerSelect.value : "3", 10) || 3));
+
+  if (btn) {
+    btn.classList.add("btn-loading");
+    btn.textContent = `⏹ Stop (0/${targets.length} Probed | ${workerCount}W)`;
+  }
+
+  startProgressAnimation(stageTitle || "HOMEPAGE-FIRST DISCOVERY", `Live-probing ${targets.length} target university homepages using ${workerCount} parallel worker(s)...`);
+  pushInlineLog("INFO", "BatchResolver", `🚀 Starting ${modeLabel} across ${targets.length} universities with ${workerCount} parallel worker(s)...`);
+
+  const discipline = document.getElementById("filter-discipline")?.value || "Computer Science";
+  let done = 0;
+
+  try {
+    for (let i = 0; i < targets.length; i += workerCount) {
+      if (stopBatchResolveRequested) {
+        pushInlineLog("WARNING", "BatchResolver", `⏸ Batch resolution paused by operator at ${done}/${targets.length} universities.`);
+        break;
+      }
+
+      const chunk = targets.slice(i, i + workerCount);
+      const chunkDomains = chunk.map(u => u.domain);
+      const chunkNames = chunk.map(u => u.name).join(", ");
+      const pct = Math.max(3, Math.round((done / targets.length) * 100));
+
+      if (btn) btn.textContent = `⏹ Stop (${done}/${targets.length} Probed | ${workerCount}W)`;
+      updateProgressStage(
+        pct,
+        `LIVE PROBING (${done}/${targets.length} | ${workerCount} WORKERS)`,
+        `Parallel batch (${done + 1}–${Math.min(done + chunk.length, targets.length)} of ${targets.length}): ${chunkNames}`,
+        `Checking 200 OK / Playwright WAF -> 院系设置 -> ${discipline} -> Saving to MongoDB`
+      );
+
+      try {
+        const res = await fetchWithAuth("/api/v1/discovery/resolve-departments", {
+          method: "POST",
+          body: JSON.stringify({
+            domains: chunkDomains,
+            discipline: discipline,
+            max_workers: workerCount
+          })
+        });
+        const updatedList = await res.json();
+        if (Array.isArray(updatedList)) {
+          updatedList.forEach(updated => {
+            done++;
+            const idx = lastDiscoveredUniversities.findIndex(item => item.domain === updated.domain);
+            if (idx !== -1) lastDiscoveredUniversities[idx] = updated;
+            const epText = (updated.department_endpoints || []).map(e => `${e.name} (${e.url})`).join(" | ");
+            const st = updated.pipeline_status || "";
+            const logLevel = st.includes("Found") ? "SUCCESS" : (st.includes("Homepage OK") ? "INFO" : "WARNING");
+            const stepSummary = st.includes("Found")
+              ? "[Step 1: Homepage OK ✓ | Step 2: CS/AI Dept Found ✓]"
+              : (st.includes("Homepage OK")
+                  ? "[Step 1: Homepage OK ✓ | Step 2: Dept Link Not Found ⚠]"
+                  : "[Step 1: Homepage Unreachable ✗]");
+            pushInlineLog(
+              logLevel,
+              "HomepageCrawler",
+              `[${done}/${targets.length}] [${updated.name}] ${stepSummary} -> ${updated.status_reason || st} | ${epText}`
+            );
+            if (Array.isArray(allDirectoryUniversities)) {
+              const dIdx = allDirectoryUniversities.findIndex(item => item.domain === updated.domain);
+              if (dIdx !== -1) allDirectoryUniversities[dIdx] = updated;
+              else allDirectoryUniversities.push(updated);
+            }
+          });
+          updateMatrixAnalyticsAndRegions();
+        }
+      } catch (e) {
+        const errMsg = String(e || "");
+        if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
+          pushInlineLog("ERROR", "BatchResolver", `⏸ Backend server connection lost (${errMsg}). Automatically paused batch at ${done}/${targets.length} so remaining universities are not skipped!`);
+          stopProgressAnimation(false, `Paused at ${done}/${targets.length}: Backend server offline (Failed to fetch). Restart server and click to resume.`);
+          break;
+        }
+        done += chunk.length;
+        pushInlineLog("ERROR", "HomepageCrawler", `[Batch ${done}/${targets.length}] (${chunkNames}) Failed: ${e}`);
+      }
+      applyPortalsTableFilter();
+    }
+  } finally {
+    isBatchResolving = false;
+    stopBatchResolveRequested = false;
+    currentActiveBatchBtn = null;
+    stopProgressAnimation(true, `Completed ${modeLabel} (${done}/${targets.length} probed with ${workerCount} parallel workers, persisted to MongoDB).`);
+    loadUniversities();
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("btn-loading");
+      btn.innerHTML = defaultHtml;
+    }
+    applyPortalsTableFilter();
+  }
+}
+
+async function resolveRealDepartmentsForVisible(triggerBtn = null) {
+  const btn = triggerBtn || document.getElementById("btn-resolve-depts");
+  if (isBatchResolving) {
+    executeBatchProbe(null, "Live Discovery & Department Resolution", btn, "🧭 Resolve Real Dept Links", "HOMEPAGE-FIRST DISCOVERY");
     return;
   }
 
@@ -943,10 +1079,8 @@ async function resolveRealDepartmentsForVisible(triggerBtn = null) {
   // Scoped worker targets based on Region, Tier, and Specific University filters
   let targets = [];
   if (univVal !== "All") {
-    // If a specific university is chosen, target it directly even if already probed
     targets = baseList.filter(u => u.domain === univVal);
   } else {
-    // Only probe unverified universities in the active filtered slice
     targets = baseList.filter(u =>
       u.pipeline_status !== "Faculty Page Found" &&
       u.pipeline_status !== "Department URL Found" &&
@@ -964,100 +1098,81 @@ async function resolveRealDepartmentsForVisible(triggerBtn = null) {
     return;
   }
 
-  isBatchResolving = true;
-  stopBatchResolveRequested = false;
+  await executeBatchProbe(
+    targets,
+    "Live Discovery & Department Resolution",
+    btn,
+    "🧭 Resolve Real Dept Links",
+    "HOMEPAGE-FIRST DISCOVERY"
+  );
+}
 
-  const workerSelect = document.getElementById("portal-probe-workers");
-  const workerCount = Math.min(3, Math.max(1, parseInt(workerSelect ? workerSelect.value : "3", 10) || 3));
-
-  if (btn) {
-    btn.classList.add("btn-loading");
-    btn.textContent = `⏹ Stop (0/${targets.length} Probed | ${workerCount}W)`;
+async function retryFailedStep1Universities(triggerBtn = null) {
+  const btn = triggerBtn || document.getElementById("btn-retry-step1-failed");
+  if (isBatchResolving) {
+    executeBatchProbe(null, "Step 1 Failed Homepage Retry", btn, `🔄 Retry Step 1 Failed (<span id="retry-s1-count">0</span>)`, "STEP 1 HOMEPAGE RETRY");
+    return;
   }
 
-  startProgressAnimation("HOMEPAGE-FIRST DISCOVERY", `Live-probing ${targets.length} unverified university homepages using ${workerCount} parallel worker(s)...`);
-  pushInlineLog("INFO", "BatchResolver", `🚀 Starting Live Homepage & WAF-Fallback Department Discovery across ${targets.length} unverified universities with ${workerCount} parallel worker(s) (skipping ${baseList.length - targets.length} already-verified)...`);
+  const baseList = (filteredPortalUniversities && filteredPortalUniversities.length > 0)
+    ? filteredPortalUniversities
+    : (lastDiscoveredUniversities || []);
 
-  const discipline = document.getElementById("filter-discipline")?.value || "Computer Science";
-  let done = 0;
+  const univVal = document.getElementById("portal-univ-filter")?.value || "All";
+  const targets = baseList.filter(u => {
+    if (univVal !== "All" && u.domain !== univVal) return false;
+    const st = u.pipeline_status || "";
+    return st.startsWith("Step 1 Failed") || st === "Requires Manual Review";
+  });
 
-  for (let i = 0; i < targets.length; i += workerCount) {
-    if (stopBatchResolveRequested) {
-      pushInlineLog("WARNING", "BatchResolver", `⏸ Batch resolution paused by operator at ${done}/${targets.length} universities.`);
-      break;
-    }
-
-    const chunk = targets.slice(i, i + workerCount);
-    const chunkDomains = chunk.map(u => u.domain);
-    const chunkNames = chunk.map(u => u.name).join(", ");
-    const pct = Math.max(3, Math.round((done / targets.length) * 100));
-
-    if (btn) btn.textContent = `⏹ Stop (${done}/${targets.length} Probed | ${workerCount}W)`;
-    updateProgressStage(
-      pct,
-      `LIVE PROBING (${done}/${targets.length} | ${workerCount} WORKERS)`,
-      `Parallel batch (${done + 1}–${Math.min(done + chunk.length, targets.length)} of ${targets.length}): ${chunkNames}`,
-      `Checking 200 OK / Playwright WAF -> 院系设置 -> ${discipline} -> Saving to MongoDB`
-    );
-
-    try {
-      const res = await fetchWithAuth("/api/v1/discovery/resolve-departments", {
-        method: "POST",
-        body: JSON.stringify({
-          domains: chunkDomains,
-          discipline: discipline,
-          max_workers: workerCount
-        })
-      });
-      const updatedList = await res.json();
-      if (Array.isArray(updatedList)) {
-        updatedList.forEach(updated => {
-          done++;
-          const idx = lastDiscoveredUniversities.findIndex(item => item.domain === updated.domain);
-          if (idx !== -1) lastDiscoveredUniversities[idx] = updated;
-          const epText = (updated.department_endpoints || []).map(e => `${e.name} (${e.url})`).join(" | ");
-          const st = updated.pipeline_status || "";
-          const logLevel = st.includes("Found") ? "SUCCESS" : (st.includes("Homepage OK") ? "INFO" : "WARNING");
-          const stepSummary = st.includes("Found")
-            ? "[Step 1: Homepage OK ✓ | Step 2: CS/AI Dept Found ✓]"
-            : (st.includes("Homepage OK")
-                ? "[Step 1: Homepage OK ✓ | Step 2: Dept Link Not Found ⚠]"
-                : "[Step 1: Homepage Unreachable ✗]");
-          pushInlineLog(
-            logLevel,
-            "HomepageCrawler",
-            `[${done}/${targets.length}] [${updated.name}] ${stepSummary} -> ${updated.status_reason || st} | ${epText}`
-          );
-          if (Array.isArray(allDirectoryUniversities)) {
-            const dIdx = allDirectoryUniversities.findIndex(item => item.domain === updated.domain);
-            if (dIdx !== -1) allDirectoryUniversities[dIdx] = updated;
-            else allDirectoryUniversities.push(updated);
-          }
-        });
-        updateMatrixAnalyticsAndRegions();
-      }
-    } catch (e) {
-      const errMsg = String(e || "");
-      if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")) {
-        pushInlineLog("ERROR", "BatchResolver", `⏸ Backend server connection lost (${errMsg}). Automatically paused batch at ${done}/${targets.length} so remaining universities are not skipped!`);
-        stopProgressAnimation(false, `Paused at ${done}/${targets.length}: Backend server offline (Failed to fetch). Restart server and click 🧭 Resolve Real Dept Links to resume.`);
-        break;
-      }
-      done += chunk.length;
-      pushInlineLog("ERROR", "HomepageCrawler", `[Batch ${done}/${targets.length}] (${chunkNames}) Failed: ${e}`);
-    }
-    applyPortalsTableFilter();
+  if (targets.length === 0) {
+    alert("No universities in the current view have Step 1 failures (all homepages are reachable or already verified)!");
+    return;
   }
 
-  isBatchResolving = false;
-  stopBatchResolveRequested = false;
-  stopProgressAnimation(true, `Completed Homepage-First Department Resolution (${done}/${targets.length} probed with ${workerCount} parallel workers, persisted to MongoDB).`);
-  loadUniversities();
-  if (btn) {
-    btn.disabled = false;
-    btn.classList.remove("btn-loading");
-    btn.textContent = "🧭 Resolve Real Dept Links";
+  const defaultHtml = `🔄 Retry Step 1 Failed (<span id="retry-s1-count">${targets.length}</span>)`;
+  await executeBatchProbe(
+    targets,
+    "Step 1 Failed Homepage Retry",
+    btn,
+    defaultHtml,
+    "STEP 1 HOMEPAGE RETRY"
+  );
+}
+
+async function retryMissingStep2Universities(triggerBtn = null) {
+  const btn = triggerBtn || document.getElementById("btn-retry-step2-missing");
+  if (isBatchResolving) {
+    executeBatchProbe(null, "Step 2 Missing Dept/Roster Retry", btn, `🧭 Retry Missing Dept/Roster (<span id="retry-s2-count">0</span>)`, "STEP 2 DEPARTMENT RETRY");
+    return;
   }
+
+  const baseList = (filteredPortalUniversities && filteredPortalUniversities.length > 0)
+    ? filteredPortalUniversities
+    : (lastDiscoveredUniversities || []);
+
+  const univVal = document.getElementById("portal-univ-filter")?.value || "All";
+  const targets = baseList.filter(u => {
+    if (univVal !== "All" && u.domain !== univVal) return false;
+    const st = u.pipeline_status || "";
+    return st === "Homepage OK · Dept Not Found" ||
+           st === "Department URL Not Found" ||
+           (st === "Homepage Verified" && (!u.department_endpoints || u.department_endpoints.length <= 1));
+  });
+
+  if (targets.length === 0) {
+    alert("No universities in the current view have missing Step 2 departments!");
+    return;
+  }
+
+  const defaultHtml = `🧭 Retry Missing Dept/Roster (<span id="retry-s2-count">${targets.length}</span>)`;
+  await executeBatchProbe(
+    targets,
+    "Step 2 Missing Department & Roster Retry",
+    btn,
+    defaultHtml,
+    "STEP 2 DEPARTMENT RETRY"
+  );
 }
 
 // Section 1: Execute Live Discovery with Active Button Feedback & Long-Running Progress
@@ -1716,7 +1831,25 @@ function updateSupervisorSelectionSummary() {
   }
 }
 
+let isSupervisorHarvesting = false;
+let stopSupervisorHarvestRequested = false;
+
+function stopSupervisorWorkerPool() {
+  if (!isSupervisorHarvesting) return;
+  stopSupervisorHarvestRequested = true;
+  const stopBtn = document.getElementById("btn-stop-sup-workers");
+  if (stopBtn) stopBtn.textContent = "⏳ Stopping after current batch...";
+  const launchBtnText = document.getElementById("btn-sup-text");
+  if (launchBtnText) launchBtnText.textContent = "⏳ Stopping after batch...";
+  pushInlineLog("WARNING", "WorkerPool", "⏸ Supervisor extraction stop requested. Halting cleanly after in-flight batch without data loss...");
+}
+
 async function launchSupervisorWorkerPool() {
+  if (isSupervisorHarvesting) {
+    stopSupervisorWorkerPool();
+    return;
+  }
+
   const regSelect = document.getElementById("sup-region-select");
   const tierSelect = document.getElementById("sup-tier-select");
   const univSelect = document.getElementById("sup-univ-select");
@@ -1748,7 +1881,11 @@ async function launchSupervisorWorkerPool() {
     return;
   }
 
+  isSupervisorHarvesting = true;
+  stopSupervisorHarvestRequested = false;
+
   const btn = document.getElementById("btn-launch-sup-workers");
+  const stopBtn = document.getElementById("btn-stop-sup-workers");
   const spinner = document.getElementById("btn-sup-spinner");
   const textEl = document.getElementById("btn-sup-text");
   const progCard = document.getElementById("sup-worker-progress-card");
@@ -1760,11 +1897,16 @@ async function launchSupervisorWorkerPool() {
   const progDetail = document.getElementById("sup-tracker-detail");
 
   if (btn) {
-    btn.disabled = true;
-    btn.classList.add("btn-loading");
+    btn.disabled = false;
+    btn.classList.add("btn-loading", "btn-danger");
+    btn.classList.remove("btn-primary");
+  }
+  if (stopBtn) {
+    stopBtn.disabled = false;
+    stopBtn.textContent = "⏹ Stop Workers";
   }
   if (spinner) spinner.classList.remove("hidden");
-  if (textEl) textEl.textContent = `Running ${workerCount} Parallel Worker(s)...`;
+  if (textEl) textEl.textContent = `⏹ Stop Supervisor Workers (0/${candidateUnivs.length} | ${workerCount}W)`;
   if (progCard) progCard.classList.remove("hidden");
 
   const totalUnivs = candidateUnivs.length;
@@ -1773,71 +1915,92 @@ async function launchSupervisorWorkerPool() {
 
   pushInlineLog("INFO", "WorkerPool", `🚀 Launching ${workerCount} parallel crawler worker(s) across ${totalUnivs} university(ies) in ${selectedReg} for ${discipline}...`);
 
-  // Process in batches of workerCount so the UI progress bar updates smoothly in real time
-  for (let i = 0; i < totalUnivs; i += workerCount) {
-    const chunk = candidateUnivs.slice(i, i + workerCount);
-    const chunkNames = chunk.map(u => u.name).join(", ");
-    const pct = Math.max(5, Math.round((completedUnivs / totalUnivs) * 100));
-
-    if (progBadge) progBadge.textContent = `${workerCount} PARALLEL WORKERS ACTIVE`;
-    if (progTitle) progTitle.textContent = `Crawling batch (${completedUnivs + 1}–${Math.min(completedUnivs + chunk.length, totalUnivs)} of ${totalUnivs} in ${selectedReg}): ${chunkNames}`;
-    if (progBar) progBar.style.width = `${pct}%`;
-    if (progPct) progPct.textContent = `${pct}% (${completedUnivs} / ${totalUnivs} Universities)`;
-    if (progDetail) progDetail.textContent = `Resolving 院系设置 -> ${discipline} -> 师资队伍 / 导师队伍 & verifying 硕导 profiles...`;
-
-    const batchTargets = chunk.map(u => ({
-      university_name: u.name,
-      domain: u.domain,
-      department_name: `School of ${discipline}`,
-      department_urls: (u.department_endpoints && u.department_endpoints.length > 0)
-        ? u.department_endpoints.map(ep => ep.url)
-        : [u.website || `https://www.${u.domain}/`]
-    }));
-
-    try {
-      const res = await fetchWithAuth("/api/v1/professors/harvest-batch", {
-        method: "POST",
-        body: JSON.stringify({
-          targets: batchTargets,
-          max_workers: workerCount,
-          auto_resolve_homepage: true,
-          discipline: discipline
-        })
-      });
-      if (res.ok) {
-        const harvestedBatch = await res.json();
-        totalHarvestedCount += harvestedBatch.length;
-        if (progStats) progStats.textContent = `${totalHarvestedCount} New Supervisors Found`;
-      }
-    } catch (err) {
-      const errStr = String(err || "");
-      if (errStr.includes("Failed to fetch") || errStr.includes("NetworkError")) {
-        pushInlineLog("ERROR", "WorkerPool", `⏸ Backend server connection lost (${errStr}). Paused supervisor extraction at ${completedUnivs}/${totalUnivs}.`);
+  try {
+    // Process in batches of workerCount so the UI progress bar updates smoothly in real time
+    for (let i = 0; i < totalUnivs; i += workerCount) {
+      if (stopSupervisorHarvestRequested) {
+        pushInlineLog("WARNING", "WorkerPool", `⏸ Supervisor worker pool paused by operator at ${completedUnivs}/${totalUnivs} universities.`);
         break;
       }
-      pushInlineLog("ERROR", "WorkerPool", `Batch worker error on (${chunkNames}): ${err}`);
+
+      const chunk = candidateUnivs.slice(i, i + workerCount);
+      const chunkNames = chunk.map(u => u.name).join(", ");
+      const pct = Math.max(5, Math.round((completedUnivs / totalUnivs) * 100));
+
+      if (textEl) textEl.textContent = `⏹ Stop Supervisor Workers (${completedUnivs}/${totalUnivs} | ${workerCount}W)`;
+      if (progBadge) progBadge.textContent = `${workerCount} PARALLEL WORKERS ACTIVE`;
+      if (progTitle) progTitle.textContent = `Crawling batch (${completedUnivs + 1}–${Math.min(completedUnivs + chunk.length, totalUnivs)} of ${totalUnivs} in ${selectedReg}): ${chunkNames}`;
+      if (progBar) progBar.style.width = `${pct}%`;
+      if (progPct) progPct.textContent = `${pct}% (${completedUnivs} / ${totalUnivs} Universities)`;
+      if (progDetail) progDetail.textContent = `Resolving 院系设置 -> ${discipline} -> 师资队伍 / 导师队伍 & verifying 硕导 profiles...`;
+
+      const batchTargets = chunk.map(u => ({
+        university_name: u.name,
+        domain: u.domain,
+        department_name: `School of ${discipline}`,
+        department_urls: (u.department_endpoints && u.department_endpoints.length > 0)
+          ? u.department_endpoints.map(ep => ep.url)
+          : [u.website || `https://www.${u.domain}/`]
+      }));
+
+      try {
+        const res = await fetchWithAuth("/api/v1/professors/harvest-batch", {
+          method: "POST",
+          body: JSON.stringify({
+            targets: batchTargets,
+            max_workers: workerCount,
+            auto_resolve_homepage: true,
+            discipline: discipline
+          })
+        });
+        if (res.ok) {
+          const harvestedBatch = await res.json();
+          totalHarvestedCount += harvestedBatch.length;
+          if (progStats) progStats.textContent = `${totalHarvestedCount} New Supervisors Found`;
+        }
+      } catch (err) {
+        const errStr = String(err || "");
+        if (errStr.includes("Failed to fetch") || errStr.includes("NetworkError")) {
+          pushInlineLog("ERROR", "WorkerPool", `⏸ Backend server connection lost (${errStr}). Paused supervisor extraction at ${completedUnivs}/${totalUnivs}.`);
+          break;
+        }
+        pushInlineLog("ERROR", "WorkerPool", `Batch worker error on (${chunkNames}): ${err}`);
+      }
+
+      completedUnivs += chunk.length;
+      await loadFaculty();
     }
 
-    completedUnivs += chunk.length;
+    if (stopSupervisorHarvestRequested) {
+      if (progBadge) progBadge.textContent = `EXTRACTION PAUSED`;
+      if (progTitle) progTitle.textContent = `Paused crawling at ${completedUnivs}/${totalUnivs} university(ies) in ${selectedReg}. All harvested supervisors preserved.`;
+      if (progDetail) progDetail.textContent = `Safe stop complete. You can resume or switch filters anytime.`;
+    } else {
+      if (progBadge) progBadge.textContent = `EXTRACTION COMPLETED`;
+      if (progTitle) progTitle.textContent = `Finished crawling ${totalUnivs} university(ies) in ${selectedReg} using ${workerCount} parallel workers.`;
+      if (progBar) progBar.style.width = `100%`;
+      if (progPct) progPct.textContent = `100% (${totalUnivs} / ${totalUnivs} Universities Completed)`;
+      if (progDetail) progDetail.textContent = `All verified Master's/PhD supervisors persisted to MongoDB.`;
+      pushInlineLog("SUCCESS", "WorkerPool", `✓ Completed parallel supervisor extraction across ${totalUnivs} university(ies).`);
+    }
+  } finally {
+    isSupervisorHarvesting = false;
+    stopSupervisorHarvestRequested = false;
+    await loadUniversities();
     await loadFaculty();
+
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("btn-loading", "btn-danger");
+      btn.classList.add("btn-primary");
+    }
+    if (stopBtn) {
+      stopBtn.disabled = false;
+      stopBtn.textContent = "⏹ Stop Workers";
+    }
+    if (spinner) spinner.classList.add("hidden");
+    if (textEl) textEl.textContent = "🚀 Launch Parallel Supervisor Workers";
   }
-
-  if (progBadge) progBadge.textContent = `EXTRACTION COMPLETED`;
-  if (progTitle) progTitle.textContent = `Finished crawling ${totalUnivs} university(ies) in ${selectedReg} using ${workerCount} parallel workers.`;
-  if (progBar) progBar.style.width = `100%`;
-  if (progPct) progPct.textContent = `100% (${totalUnivs} / ${totalUnivs} Universities Completed)`;
-  if (progDetail) progDetail.textContent = `All verified Master's/PhD supervisors persisted to MongoDB.`;
-
-  pushInlineLog("SUCCESS", "WorkerPool", `✓ Completed parallel supervisor extraction across ${totalUnivs} university(ies).`);
-  await loadUniversities();
-  await loadFaculty();
-
-  if (btn) {
-    btn.disabled = false;
-    btn.classList.remove("btn-loading");
-  }
-  if (spinner) spinner.classList.add("hidden");
-  if (textEl) textEl.textContent = "🚀 Launch Parallel Supervisor Workers";
 }
 
 function applyMatrixTableFilter() {

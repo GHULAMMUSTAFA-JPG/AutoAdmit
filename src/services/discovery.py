@@ -874,20 +874,31 @@ class DiscoveryEngine:
                     logger.info(f"[{university.name}] [Step 1/2 ✓] Live Homepage Verified at {working_root}")
                     break
 
-            # Discipline-Adaptive Department Keywords
+            # Discipline-Adaptive Department Keywords with Rich Chinese Higher-Ed Taxonomy
             disc_lower = (discipline or "").lower()
             dept_keywords = [
                 "计算机", "人工智能", "软件", "数计", "数学与计算机", "信息工程", "信息科学",
-                "智能科学", "网络空间", "大数据", "物联网", "网络工程", "数据科学",
+                "智能科学", "网络空间", "大数据", "物联网", "网络工程", "数据科学", "电子信息",
+                "计算机科学与技术", "智能与计算", "计算学院", "大数据与软件",
                 "computer", "artificial intelligence", "software", "informatics", "computing"
             ]
             if "artif" in disc_lower or "ai" in disc_lower:
-                dept_keywords = ["人工智能", "智能科学", "智能工程", "机器人", "自动化", "ai", "artificial intelligence", "robotics"] + dept_keywords
+                dept_keywords = [
+                    "人工智能", "智能科学与技术", "智能科学", "智能工程", "机器人", "自动化",
+                    "机器智能", "智能控制", "模式识别", "ai", "artificial intelligence", "robotics"
+                ] + dept_keywords
             elif "soft" in disc_lower:
-                dept_keywords = ["软件", "软件工程", "网络空间安全", "信息安全", "software", "cyber"] + dept_keywords
+                dept_keywords = [
+                    "软件", "软件工程", "网络空间安全", "信息安全", "保密学院", "网络安全",
+                    "software", "cyber", "information security"
+                ] + dept_keywords
 
-            unit_suffixes = ["学院", "系", "学部", "研究院", "中心", "school", "college", "department", "faculty"]
-            nav_keywords = ["院系设置", "机构设置", "教学单位", "学院设置", "二级学院", "学部院系", "院系总览", "学院导航"]
+            unit_suffixes = ["学院", "系", "学部", "研究院", "重点实验室", "中心", "school", "college", "department", "faculty"]
+            nav_keywords = [
+                "院系设置", "机构设置", "教学单位", "学院设置", "二级学院", "学部院系",
+                "院系总览", "学院导航", "教学机构", "院系所", "教学与科研", "学科建设",
+                "教学科研单位", "学校机构", "组织机构", "教育教学"
+            ]
             news_exclude_keywords = ["活动", "通知", "公告", "新闻", "讲座", "招聘", "公示", "大赛", "会议", "党支部", "获批", "举行", "开展", "圆满", "喜报"]
             auth_url_exclusions = ["login", "authserver", "webvpn", "clientvpn", "cas", "sso", "passport", "portal", "userlogin"]
             auth_title_exclusions = ["统一身份认证", "用户登录", "系统登录", "认证中心", "vpn登录", "单点登录"]
@@ -896,7 +907,9 @@ class DiscoveryEngine:
                 t_clean = (text_str or "").strip()
                 t_low = t_clean.lower()
                 u_low = (url_str or "").lower()
-                if not t_clean or len(t_clean) > 22:
+                # Accept up to 34 characters to allow standard parenthetical Chinese college names
+                # e.g. 计算机科学与技术学院（示范性软件学院）
+                if not t_clean or len(t_clean) > 34:
                     return False
                 if any(nk in u_low for nk in ("/info/", "/news/", "/content/", "/article/", "/notice/")):
                     return False
@@ -1067,6 +1080,8 @@ class DiscoveryEngine:
                 "师资队伍", "教师名录", "师资力量", "教师队伍", "师资概况", "专任教师",
                 "教授名录", "副教授名录", "导师介绍", "导师信息", "硕导名单", "博导名单",
                 "学术队伍", "教师简介", "教师主页", "师资介绍", "人员概况", "教职工",
+                "硕士导师", "博士导师", "博导名录", "硕导名录", "导师名录", "指导教师",
+                "学术骨干", "骨干教师", "学者名录", "教授", "副教授",
                 "faculty", "supervisors", "professors", "people", "academic staff"
             ]
 
@@ -1082,7 +1097,7 @@ class DiscoveryEngine:
                     for a in d_soup.find_all("a", href=True):
                         ft = a.get_text(strip=True)
                         fac_url = _safe_urljoin(d_final_url, a.get("href", ""))
-                        if ft and fac_url and any(fk in ft.lower() for fk in faculty_keywords) and len(ft) <= 20:
+                        if ft and fac_url and any(fk in ft.lower() for fk in faculty_keywords) and len(ft) <= 25:
                             final_endpoints.append(DepartmentEndpoint(
                                 name=f"👨‍🏫 {d_name} ({ft})",
                                 url=fac_url,
