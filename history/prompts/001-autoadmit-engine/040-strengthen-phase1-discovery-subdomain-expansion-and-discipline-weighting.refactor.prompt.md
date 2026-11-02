@@ -50,3 +50,4 @@ apply fixes and makre sure to strengthen the p1 as all depends on it
 5. **MongoDB Persistence Serialization & Live Batch UI Sync:**
    - Ensured safe JSON serialization via `json.loads(updated_univ.model_dump_json())` in `routes_discovery.py`, preventing any BSON encoding issues.
    - Enhanced `resolveRealDepartmentsForVisible()` to sync `allDirectoryUniversities` and trigger live analytics recalculation as each batch chunk completes.
+
