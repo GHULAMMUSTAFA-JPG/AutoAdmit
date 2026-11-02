@@ -1801,6 +1801,103 @@ body.enterprise-body {
   background-color: #f8fafc;
 }
 
+/* 3-Row Endpoints & Status Layout for Institutional Matrix Table */
+.matrix-endpoints-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 300px;
+}
+
+.matrix-endpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.matrix-endpoint-row .badge-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.12rem 0.4rem;
+  border-radius: 3px;
+  min-width: 76px;
+  text-align: center;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Green (Success / Verified / Found) */
+.matrix-endpoint-row.ok .badge-tag {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+.matrix-endpoint-row.ok a {
+  font-family: var(--font-mono);
+  color: #15803d;
+  font-weight: 600;
+  text-decoration: underline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+}
+.matrix-endpoint-row.ok a:hover {
+  color: #166534;
+}
+.matrix-endpoint-row.ok .note-txt {
+  color: #166534;
+  font-weight: 500;
+}
+
+/* Red (Failed / Unreachable / Missing) */
+.matrix-endpoint-row.fail .badge-tag {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #f87171;
+}
+.matrix-endpoint-row.fail a {
+  font-family: var(--font-mono);
+  color: #dc2626;
+  text-decoration: underline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+}
+.matrix-endpoint-row.fail a:hover {
+  color: #991b1b;
+}
+.matrix-endpoint-row.fail .note-txt {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+/* Amber / Neutral (Pending) */
+.matrix-endpoint-row.pending .badge-tag {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+.matrix-endpoint-row.pending a {
+  font-family: var(--font-mono);
+  color: #64748b;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+}
+.matrix-endpoint-row.pending a:hover {
+  text-decoration: underline;
+  color: #334155;
+}
+.matrix-endpoint-row.pending .note-txt {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+
 
 
 

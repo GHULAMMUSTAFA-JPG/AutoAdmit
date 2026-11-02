@@ -39,7 +39,6 @@
             <span class="brand-title">Enterprise Admission Engine</span>
             <span class="brand-subtitle">Automated Chinese University Discovery & Supervisor Verification</span>
           </div>
-          <span class="system-env-pill">Production Gateway</span>
         </div>
 
         <!-- System Controls & Safety Status -->
@@ -76,35 +75,6 @@
         </div>
       </div>
 
-      <!-- Top Enterprise Sticky Navigation Bar -->
-      <nav class="enterprise-nav-bar" id="enterprise-nav">
-        <div class="nav-links-track">
-          <a href="#tab-setup" class="nav-tab active" onclick="smoothJump(event, 'tab-setup')">
-            <span class="step-num">01</span> Discovery & Cost Gate
-          </a>
-          <a href="#tab-universities" class="nav-tab" onclick="smoothJump(event, 'tab-universities')">
-            <span class="step-num">02</span> Universities Directory
-          </a>
-          <a href="#tab-faculty" class="nav-tab" onclick="smoothJump(event, 'tab-faculty')">
-            <span class="step-num">03</span> Faculty Supervisors Roster
-          </a>
-          <a href="#tab-prompts" class="nav-tab" onclick="smoothJump(event, 'tab-prompts')">
-            <span class="step-num">04</span> Prompts & Directives
-          </a>
-          <a href="#tab-review" class="nav-tab" onclick="smoothJump(event, 'tab-review')">
-            <span class="step-num">05</span> Email Review Workspace
-          </a>
-          <a href="#tab-dispatch" class="nav-tab" onclick="smoothJump(event, 'tab-dispatch')">
-            <span class="step-num">06</span> Outbox Dispatcher
-          </a>
-          <a href="#tab-analytics" class="nav-tab" onclick="smoothJump(event, 'tab-analytics')">
-            <span class="step-num">07</span> Analytics & Telemetry
-          </a>
-          <a href="#tab-terminal" class="nav-tab" onclick="smoothJump(event, 'tab-terminal')">
-            <span class="step-num">08</span> Live System Console
-          </a>
-        </div>
-      </nav>
     </header>
 
     <!-- Main Content Canvas -->
@@ -345,10 +315,13 @@
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="runRegionalFilter(this)">↻ Refresh</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="clearDiscoveredUniversities()">Clear</button>
                 <button class="btn btn-success btn-sm btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Step 03: Harvest Supervisors ➔</button>
+                <button id="btn-toggle-portals-collapse" class="btn btn-secondary btn-sm btn-interactive" onclick="togglePortalsCollapse()" title="Minimize or expand Table 1 to save vertical screen space">➖ Minimize Table</button>
               </div>
             </div>
 
-            <!-- Live Filter & Sort Toolbar for Table 1 -->
+            <!-- Collapsible Portals Container (Toggleable) -->
+            <div id="portals-collapsible-content">
+              <!-- Live Filter & Sort Toolbar for Table 1 -->
             <div id="portals-filter-toolbar" class="table-toolbar">
               <div class="toolbar-item toolbar-search">
                 <input type="text" id="portal-search-input" class="form-control form-control-sm" placeholder="🔎 Filter table by university name, Chinese name, or domain..." oninput="applyPortalsTableFilter()" />
@@ -434,6 +407,7 @@
                 <div class="log-entry info">[SYSTEM] Ready. Click 'Execute Live Discovery', 'Resolve Real Dept Links', or launch Supervisor Workers in Section 03 to watch live university-by-university progress here.</div>
               </div>
             </div>
+            </div> <!-- /#portals-collapsible-content -->
           </div>
 
         </div>
@@ -524,8 +498,13 @@
                 <option value="tier-asc">Sort: Tier (Dream → Safety)</option>
                 <option value="name-asc">Sort: University Name (A → Z)</option>
                 <option value="status-asc">Sort: Verification Status</option>
-                <option value="fee-asc">Sort: Application Fee (Waived First)</option>
               </select>
+            </div>
+            <div class="toolbar-item">
+              <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--text-secondary); cursor: pointer; margin: 0; padding: 0.25rem 0.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Toggle to show only pending or unprobed universities">
+                <input type="checkbox" id="matrix-hide-completed" onchange="applyMatrixTableFilter()" />
+                <span>Hide Completed</span>
+              </label>
             </div>
             <div class="toolbar-item">
               <select id="matrix-limit-select" class="form-control form-control-sm" onchange="onTableLimitChange('matrix', this.value)" title="Number of rows shown in matrix">
@@ -545,11 +524,10 @@
                 <thead>
                   <tr>
                     <th class="col-num">#</th>
-                    <th class="sortable-th" onclick="setMatrixSort('name-asc')" style="min-width: 190px;">University Name ⇅</th>
+                    <th class="sortable-th" onclick="setMatrixSort('name-asc')" style="min-width: 220px;">University Name ⇅</th>
                     <th class="sortable-th" onclick="setMatrixSort('region-asc')" style="min-width: 175px;">Region & Tier ⇅</th>
-                    <th style="min-width: 240px;">Official Domain & Gathered Endpoints</th>
-                    <th class="sortable-th" onclick="setMatrixSort('fee-asc')" style="min-width: 130px;">Scholarships & Fee ⇅</th>
-                    <th class="sortable-th" onclick="setMatrixSort('status-asc')" style="min-width: 140px;">Live Status ⇅</th>
+                    <th style="min-width: 320px;">Official Domain & Gathered Endpoints</th>
+                    <th class="sortable-th" onclick="setMatrixSort('status-asc')" style="min-width: 130px;">Live Status ⇅</th>
                     <th class="col-action" style="width: 75px; text-align: center;">Action</th>
                   </tr>
                 </thead>

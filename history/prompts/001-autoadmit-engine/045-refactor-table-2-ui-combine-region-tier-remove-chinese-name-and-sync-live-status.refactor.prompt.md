@@ -48,3 +48,4 @@ Refactored Section 02 (Table 2 - Institutional Directory & Feasibility Matrix) w
 
 5. **Visual Styling & Beauty Improvements:**
    - Added `.btn-xs` and styled `#matrix-table-view` in `src/static/css/style.css` with clean borders (`#cbd5e1`), subtle headers (`#f1f5f9`), smooth hover highlighting (`#f8fafc`), and tight cell padding.
+

@@ -704,8 +704,8 @@ class DiscoveryEngine:
             ]
             if cleaned_eps and u.pipeline_status == "Pending Live Check":
                 for ep in cleaned_eps:
-                    if ep.name in ("Verified Institutional Homepage", "Institutional Homepage (Pending Live Check)"):
-                        ep.name = "Institutional Homepage (Pending Live Check)"
+                    if ep.name in ("Verified Institutional Homepage", "Institutional Homepage (Pending Live Check)", "Institutional Homepage"):
+                        ep.name = "Institutional Homepage"
                         ep.is_verified = False
                         ep.status = "Pending Live Check"
             u.department_endpoints = cleaned_eps if cleaned_eps else self.discover_department_endpoints(u)
@@ -730,7 +730,7 @@ class DiscoveryEngine:
         is_live_verified = bool(university.website_verified and university.verified_at)
         return [
             DepartmentEndpoint(
-                name="Verified Institutional Homepage" if is_live_verified else "Institutional Homepage (Pending Live Check)",
+                name="Verified Institutional Homepage" if is_live_verified else "Institutional Homepage",
                 url=homepage,
                 is_verified=is_live_verified,
                 status="Homepage Verified" if is_live_verified else "Pending Live Check"

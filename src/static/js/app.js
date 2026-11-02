@@ -354,9 +354,22 @@ function getPipelineStatusBadge(status, reason) {
     return `<span class="badge badge-status-manual" title="❌ STEP 1 FAILED REASON: ${errTip}">✗ Step 1 Failed: Unreachable / WAF ⓘ</span>`;
   }
   if (s === "Homepage Verified" || s === "University Homepage Verified") {
-    return `<span class="badge badge-status-verified" title="${tip || 'Step 1 Succeeded: Homepage verified live (HTTP 200 OK).'}">✓ Step 1: Homepage Verified ⓘ</span>`;
+    return `<span class="badge badge-status-verified" title="${tip || 'Step 1 Succeeded: Homepage verified live (HTTP 200 OK).'}">✓ Step 1: Homepage OK</span>`;
   }
-  return `<span class="badge badge-status-pending" title="⏳ Not live-probed yet. Click '🧭 Verify & Find Dept' on this row or '🧭 Resolve Real Dept Links' above to verify live.">⏳ Pending Live Check</span>`;
+  return `<span class="badge badge-status-pending" title="⏳ Not live-probed yet. Click '🧭 Probe' on this row or '🧭 Resolve Real Dept Links' above to verify live.">⏳ Pending</span>`;
+}
+
+function togglePortalsCollapse() {
+  const content = document.getElementById("portals-collapsible-content");
+  const btn = document.getElementById("btn-toggle-portals-collapse");
+  if (!content) return;
+  if (content.style.display === "none") {
+    content.style.display = "";
+    if (btn) btn.innerHTML = "➖ Minimize Table";
+  } else {
+    content.style.display = "none";
+    if (btn) btn.innerHTML = "➕ Expand Table";
+  }
 }
 
 // Table Viewport Size (10 visible rows by default = 415px) & Scrollable Row Buffer
@@ -2048,6 +2061,7 @@ function applyMatrixTableFilter() {
   const regionVal = document.getElementById("matrix-region-filter")?.value || "All";
   const tierVal = document.getElementById("matrix-tier-filter")?.value || "All";
   const sortVal = document.getElementById("matrix-sort-select")?.value || "region-asc";
+  const hideCompleted = document.getElementById("matrix-hide-completed")?.checked || false;
 
   // Sync active state on regional pills
   const pills = document.querySelectorAll("#matrix-region-pills .region-pill");
@@ -2065,7 +2079,7 @@ function applyMatrixTableFilter() {
     if (countEl) countEl.textContent = "0";
     tbody.innerHTML = `
       <tr>
-        <td colspan="7" class="empty-state-cell">
+        <td colspan="6" class="empty-state-cell">
           <div class="empty-state">
             <span class="empty-icon">🏛️</span>
             <h4>Database Directory Empty</h4>
@@ -2096,6 +2110,10 @@ function applyMatrixTableFilter() {
   });
 
   let filtered = mergedSource.filter(u => {
+    if (hideCompleted) {
+      const isCompleted = Boolean(u.website_verified || u.live_status === "200_ok" || u.pipeline_status === "Homepage Verified" || u.pipeline_status === "Department URL Found" || u.pipeline_status === "Faculty Page Found" || u.pipeline_status === "Professor Extraction Completed");
+      if (isCompleted) return false;
+    }
     if (regionVal !== "All" && u.region !== regionVal) return false;
     if (tierVal !== "All" && u.tier !== tierVal) return false;
     if (searchVal) {
@@ -2119,7 +2137,7 @@ function applyMatrixTableFilter() {
     if (showLbl) showLbl.textContent = "Showing 0 rows";
     tbody.innerHTML = `
       <tr>
-        <td colspan="7" class="empty-state-cell">
+        <td colspan="6" class="empty-state-cell">
           <div class="empty-state">
             <span class="empty-icon">🔎</span>
             <h4>No Matching Records</h4>
@@ -2142,51 +2160,74 @@ function applyMatrixTableFilter() {
   visibleRows.forEach((u, idx) => {
     const tr = document.createElement("tr");
 
-    // Unified National Classification & Competitiveness Note
-    let natClassHtml = `<span class="badge badge-region-default">Provincial Key</span>`;
+    // Unified Competitiveness Note without redundant project types
     let compNote = "Accredited Master's institution";
     if (u.is_project_985) {
-      natClassHtml = `<span class="badge badge-tier-1">Project 985 / C9</span>`;
       compNote = "High competition · Elite research labs";
     } else if (u.is_project_211) {
-      natClassHtml = `<span class="badge badge-tier-2">Project 211 / Double First-Class</span>`;
-      compNote = "Strong quota · Key national engineering";
+      compNote = "Key national engineering · Strong quota";
     } else {
       compNote = "High acceptance flexibility";
     }
 
-    // Accurate Application Fee
-    let feeHtml = `<span class="badge badge-fee-standard" title="Most Chinese universities charge 400–800 RMB processing fee unless waived via CSC or university policy">${u.fee_note || "400–800 RMB (Standard Est.)"}</span>`;
-    if (u.application_fee_rmb === 0) {
-      feeHtml = `<span class="badge badge-fee-waived">0 RMB (Fee Waived)</span>`;
-    } else if (typeof u.application_fee_rmb === "number" && u.application_fee_rmb > 0) {
-      feeHtml = `<span class="badge badge-fee-standard">${u.application_fee_rmb} RMB</span>`;
+    const officialSite = u.website || `https://www.${u.domain}/`;
+    const isHpOk = Boolean(u.website_verified || u.live_status === "200_ok" || u.pipeline_status === "Homepage Verified" || u.pipeline_status === "Department URL Found" || u.pipeline_status === "Faculty Page Found" || u.pipeline_status === "Professor Extraction Completed");
+    const isHpFailed = Boolean(u.pipeline_status && u.pipeline_status.startsWith("Step 1 Failed"));
+
+    // Department endpoint
+    const deptEp = (u.department_endpoints || []).find(ep => ep.name && (ep.name.includes("Department") || ep.name.includes("学院") || (ep.url && (ep.url.includes("cs.") || ep.url.includes("ai.") || ep.url.includes("se.")))));
+    const isDeptOk = Boolean(deptEp && (deptEp.is_verified || u.pipeline_status === "Department URL Found" || u.pipeline_status === "Faculty Page Found" || u.pipeline_status === "Professor Extraction Completed"));
+    const isDeptFailed = Boolean(u.pipeline_status === "Homepage OK · Dept Not Found" || u.pipeline_status === "Department URL Not Found");
+
+    // Supervisor / Roster endpoint
+    const rosterEp = (u.department_endpoints || []).find(ep => ep.name && (ep.name.includes("Supervisor") || ep.name.includes("导师") || ep.name.includes("Faculty") || ep.name.includes("Roster")));
+    const isRosterOk = Boolean(rosterEp || u.pipeline_status === "Faculty Page Found" || u.pipeline_status === "Professor Extraction Completed");
+
+    // Row 1: Root Homepage
+    let row1Html = "";
+    if (isHpOk) {
+      row1Html = `<div class="matrix-endpoint-row ok"><span class="badge-tag">✓ Root</span><a href="${officialSite}" target="_blank" title="${officialSite}">${u.domain} ↗</a></div>`;
+    } else if (isHpFailed) {
+      row1Html = `<div class="matrix-endpoint-row fail"><span class="badge-tag">✗ Root</span><a href="${officialSite}" target="_blank" title="${officialSite}">${u.domain} (Offline) ↗</a></div>`;
+    } else {
+      row1Html = `<div class="matrix-endpoint-row pending"><span class="badge-tag">⏳ Root</span><a href="${officialSite}" target="_blank" title="${officialSite}">${u.domain} (Pending) ↗</a></div>`;
     }
 
-    const officialSite = u.website || `https://www.${u.domain}/`;
+    // Row 2: Department Link
+    let row2Html = "";
+    if (isDeptOk && deptEp && deptEp.url) {
+      row2Html = `<div class="matrix-endpoint-row ok"><span class="badge-tag">✓ Dept</span><a href="${deptEp.url}" target="_blank" title="${deptEp.url}">${deptEp.url} ↗</a></div>`;
+    } else if (isDeptFailed) {
+      row2Html = `<div class="matrix-endpoint-row fail"><span class="badge-tag">✗ Dept</span><span class="note-txt">Not Found in 院系设置</span></div>`;
+    } else if (isHpFailed) {
+      row2Html = `<div class="matrix-endpoint-row fail"><span class="badge-tag">✗ Dept</span><span class="note-txt">Skipped (Root Offline)</span></div>`;
+    } else {
+      row2Html = `<div class="matrix-endpoint-row pending"><span class="badge-tag">⏳ Dept</span><span class="note-txt">Pending Verification</span></div>`;
+    }
 
-    // Gathered Specific Department/Supervisor Links Displayed Clearly Alongside Root
-    const endpointsListHtml = (u.department_endpoints || []).map(ep => {
-      let icon = "🌐";
-      if (ep.name.includes("🏛️") || ep.name.includes("Homepage")) icon = "🏛️";
-      else if (ep.name.includes("👨‍🏫") || ep.name.includes("Supervisor") || ep.name.includes("导师")) icon = "👨‍🏫";
-      else if (ep.name.includes("🎓") || ep.name.includes("Department") || ep.name.includes("学院")) icon = "🎓";
-      return `
-        <div class="endpoint-chip-item">
-          <span class="badge version">${icon} ${ep.name}</span>
-          <a href="${ep.url}" target="_blank" title="${ep.url}">${ep.url} ↗</a>
-        </div>
-      `;
-    }).join("") || `
-      <div class="endpoint-chip-item">
-        <span class="badge version">🏛️ Root</span>
-        <a href="${officialSite}" target="_blank" title="${officialSite}">${u.domain} ↗</a>
+    // Row 3: Supervisor / Faculty Roster Link
+    let row3Html = "";
+    if (isRosterOk && rosterEp && rosterEp.url) {
+      row3Html = `<div class="matrix-endpoint-row ok"><span class="badge-tag">✓ Roster</span><a href="${rosterEp.url}" target="_blank" title="${rosterEp.url}">${rosterEp.url} ↗</a></div>`;
+    } else if (u.pipeline_status === "Professor Extraction Completed") {
+      row3Html = `<div class="matrix-endpoint-row ok"><span class="badge-tag">✓ Roster</span><span class="note-txt">Indexed in Tab 03</span></div>`;
+    } else if (isDeptFailed || isHpFailed) {
+      row3Html = `<div class="matrix-endpoint-row fail"><span class="badge-tag">✗ Roster</span><span class="note-txt">No Roster Link</span></div>`;
+    } else {
+      row3Html = `<div class="matrix-endpoint-row pending"><span class="badge-tag">⏳ Roster</span><span class="note-txt">Pending Harvest</span></div>`;
+    }
+
+    const endpointsStackHtml = `
+      <div class="matrix-endpoints-stack">
+        ${row1Html}
+        ${row2Html}
+        ${row3Html}
       </div>
     `;
 
     tr.innerHTML = `
       <td class="col-num">${idx + 1}</td>
-      <td style="max-width: 220px;">
+      <td style="min-width: 220px; max-width: 280px;">
         <div style="font-weight: 600; color: var(--text-primary); line-height: 1.35;">${u.name}</div>
       </td>
       <td style="min-width: 175px;">
@@ -2194,18 +2235,12 @@ function applyMatrixTableFilter() {
           <span class="badge ${getRegionBadgeClass(u.region)}">${u.region || "National"}</span>
           <span class="badge ${getTierBadgeClass(u.tier)}">${u.tier || "Tier 3"}</span>
         </div>
-        <div style="font-size: 0.72rem; color: var(--text-secondary);">${natClassHtml} · ${compNote}</div>
+        <div style="font-size: 0.72rem; color: var(--text-secondary);">${compNote}</div>
       </td>
-      <td>
-        <div class="endpoint-chips-list">
-          ${endpointsListHtml}
-        </div>
+      <td style="min-width: 320px;">
+        ${endpointsStackHtml}
       </td>
       <td style="min-width: 130px;">
-        <div style="margin-bottom: 3px;">${feeHtml}</div>
-        <div style="font-size: 0.72rem; color: var(--text-secondary);">${(u.scholarships_available || []).join(", ") || "Provincial / Presidential"}</div>
-      </td>
-      <td style="min-width: 140px;">
         <div>${getPipelineStatusBadge(u.pipeline_status, u.status_reason)}</div>
       </td>
       <td class="col-action" style="text-align: center;">
