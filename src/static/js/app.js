@@ -1028,7 +1028,13 @@ async function resolveRealDepartmentsForVisible(triggerBtn = null) {
             "HomepageCrawler",
             `[${done}/${targets.length}] [${updated.name}] ${stepSummary} -> ${updated.status_reason || st} | ${epText}`
           );
+          if (Array.isArray(allDirectoryUniversities)) {
+            const dIdx = allDirectoryUniversities.findIndex(item => item.domain === updated.domain);
+            if (dIdx !== -1) allDirectoryUniversities[dIdx] = updated;
+            else allDirectoryUniversities.push(updated);
+          }
         });
+        updateMatrixAnalyticsAndRegions();
       }
     } catch (e) {
       const errMsg = String(e || "");

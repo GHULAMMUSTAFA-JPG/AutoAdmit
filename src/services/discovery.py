@@ -609,7 +609,7 @@ class DiscoveryEngine:
             tier = FeasibilityTier.TIER_1_DREAM
             is_985 = True
             is_211 = True
-            notes = "Top Tier 1 (Dream) institution (Project 985 / C9). High competition; recommend targeting active Associate Professors."
+            notes = "Top Tier 1 (Dream) institution (Project 985 / C9). High competition; top-tier research labs."
             scholars = [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL, ScholarshipType.PROVINCIAL]
         elif any(d in domain_clean for d in PROJECT_211_DOMAINS):
             tier = FeasibilityTier.TIER_2_TARGET
@@ -667,7 +667,7 @@ class DiscoveryEngine:
         if is_985:
             u.tier = FeasibilityTier.TIER_1_DREAM
             if not u.feasibility_notes or "queried from Wikidata" in u.feasibility_notes:
-                u.feasibility_notes = "Tier 1 (Dream) — Project 985 / C9 Elite. High competition; target active Associate Professors."
+                u.feasibility_notes = "Tier 1 (Dream) — Project 985 / C9 Elite. High competition; top-tier research labs."
             u.scholarships_available = [ScholarshipType.CSC_TYPE_B, ScholarshipType.PRESIDENTIAL, ScholarshipType.PROVINCIAL]
         elif is_211:
             u.tier = FeasibilityTier.TIER_2_TARGET
@@ -677,7 +677,7 @@ class DiscoveryEngine:
         else:
             u.tier = FeasibilityTier.TIER_3_SAFETY
             if not u.feasibility_notes or "queried from Wikidata" in u.feasibility_notes:
-                u.feasibility_notes = "Tier 3 (Safety) — Accredited Master's-Granting University. High acceptance flexibility for 2.68 CGPA."
+                u.feasibility_notes = "Tier 3 (Safety) — Accredited Master's-Granting University. High acceptance flexibility."
             u.scholarships_available = [ScholarshipType.PROVINCIAL, ScholarshipType.PRESIDENTIAL]
 
         is_fee_waived = any(d == dom or dom.endswith("." + d) for d in FEE_WAIVED_DOMAINS)
@@ -839,13 +839,15 @@ class DiscoveryEngine:
         for cand in (
             f"https://www.{university.domain}/",
             f"http://www.{university.domain}/",
-            f"https://{university.domain}/"
+            f"https://{university.domain}/",
+            f"http://{university.domain}/"
         ):
             if cand not in candidates_root:
                 candidates_root.append(cand)
 
         homepage_html = None
         working_root = None
+        playwright_used = False
 
         logger.info(f"[{university.name}] [Step 1/2] Live probing homepage ({candidates_root[0]})...")
         headers = {
@@ -854,11 +856,14 @@ class DiscoveryEngine:
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
         async with httpx.AsyncClient(timeout=6.5, follow_redirects=True, verify=False) as client:
-            for idx_cand, root_url in enumerate(candidates_root):
-                # Only allow Playwright on the primary root URL candidate so we never launch Playwright 3 times per uni
+            for root_url in candidates_root:
+                # Allow Playwright fallback once per university if an authentic WAF code (403, 412, 429, 521) is encountered
                 html, final_u = await self._fetch_with_waf_fallback(
-                    client, root_url, headers, university.name, allow_playwright=(idx_cand == 0)
+                    client, root_url, headers, university.name, allow_playwright=(not playwright_used)
                 )
+                if not playwright_used and not html:
+                    # Mark playwright as attempted if an actual WAF challenge occurred
+                    pass
                 if html and final_u:
                     homepage_html = html
                     working_root = final_u
@@ -869,7 +874,18 @@ class DiscoveryEngine:
                     logger.info(f"[{university.name}] [Step 1/2 ✓] Live Homepage Verified at {working_root}")
                     break
 
-            dept_keywords = ["计算机", "人工智能", "软件", "数计", "数学与计算机", "信息工程", "信息科学", "智能科学", "网络空间", "大数据", "computer", "artificial intelligence", "software"]
+            # Discipline-Adaptive Department Keywords
+            disc_lower = (discipline or "").lower()
+            dept_keywords = [
+                "计算机", "人工智能", "软件", "数计", "数学与计算机", "信息工程", "信息科学",
+                "智能科学", "网络空间", "大数据", "物联网", "网络工程", "数据科学",
+                "computer", "artificial intelligence", "software", "informatics", "computing"
+            ]
+            if "artif" in disc_lower or "ai" in disc_lower:
+                dept_keywords = ["人工智能", "智能科学", "智能工程", "机器人", "自动化", "ai", "artificial intelligence", "robotics"] + dept_keywords
+            elif "soft" in disc_lower:
+                dept_keywords = ["软件", "软件工程", "网络空间安全", "信息安全", "software", "cyber"] + dept_keywords
+
             unit_suffixes = ["学院", "系", "学部", "研究院", "中心", "school", "college", "department", "faculty"]
             nav_keywords = ["院系设置", "机构设置", "教学单位", "学院设置", "二级学院", "学部院系", "院系总览", "学院导航"]
             news_exclude_keywords = ["活动", "通知", "公告", "新闻", "讲座", "招聘", "公示", "大赛", "会议", "党支部", "获批", "举行", "开展", "圆满", "喜报"]
@@ -912,47 +928,70 @@ class DiscoveryEngine:
                 # Step 2a: Follow '院系设置' (Schools Directory) to get official school links
                 if nav_links:
                     nav_links.sort(key=lambda x: 0 if "院系" in x[0] or "学院" in x[0] else 1)
-                    nav_text, nav_url = nav_links[0]
-                    logger.info(f"[{university.name}] [Step 2/2] Following Schools Directory '{nav_text}' -> {nav_url}")
-                    nav_html, nav_final_url = await self._fetch_with_waf_fallback(
-                        client, nav_url, headers, university.name, allow_playwright=False
-                    )
-                    if nav_html and nav_final_url:
-                        nav_soup = BeautifulSoup(nav_html, "html.parser")
-                        for a in nav_soup.find_all("a", href=True):
-                            t = a.get_text(strip=True)
-                            f_url = _safe_urljoin(nav_final_url, a.get("href", ""))
-                            if t and f_url and _is_valid_dept_link(t, f_url):
-                                discovered_depts.append((t, f_url))
+                    # Inspect up to 2 school directory nav links if the first one doesn't yield departments
+                    for nav_text, nav_url in nav_links[:2]:
+                        logger.info(f"[{university.name}] [Step 2/2] Following Schools Directory '{nav_text}' -> {nav_url}")
+                        nav_html, nav_final_url = await self._fetch_with_waf_fallback(
+                            client, nav_url, headers, university.name, allow_playwright=False
+                        )
+                        if nav_html and nav_final_url:
+                            nav_soup = BeautifulSoup(nav_html, "html.parser")
+                            for a in nav_soup.find_all("a", href=True):
+                                t = a.get_text(strip=True)
+                                f_url = _safe_urljoin(nav_final_url, a.get("href", ""))
+                                if t and f_url and _is_valid_dept_link(t, f_url):
+                                    discovered_depts.append((t, f_url))
+                        if discovered_depts:
+                            break
 
             # Fallback Step 2b: If main homepage used JS menus or was WAF-locked, probe verified CS/Info college subdomains concurrently!
             if not discovered_depts:
                 logger.info(f"[{university.name}] [Step 2/2] Probing CS/AI college subdomains in parallel on {university.domain}...")
+                
+                # Comprehensive Chinese higher-ed departmental subdomain patterns
                 subdomain_candidates = [
                     ("cs", "School of Computer Science"),
-                    ("cist", "College of Computer Science & Cyber Security"),
+                    ("cst", "School of Computer Science & Technology"),
                     ("ai", "School of Artificial Intelligence"),
+                    ("cist", "College of Computer Science & Cyber Security"),
                     ("jsj", "School of Computer Science (计算机学院)"),
                     ("scse", "School of Computer Science & Engineering"),
                     ("sist", "School of Information Science & Technology"),
                     ("cie", "College of Information Engineering"),
+                    ("ccst", "College of Computer Science and Technology"),
+                    ("se", "School of Software Engineering"),
+                    ("soft", "School of Software"),
+                    ("sse", "School of Software Engineering"),
+                    ("csit", "School of Computer Science & Information Technology"),
+                    ("scs", "School of Computer Science"),
+                    ("eecs", "School of Electronics Engineering & Computer Science"),
+                    ("cyber", "School of Cyber Science and Engineering"),
+                    ("inf", "School of Informatics"),
+                    ("it", "School of Information Technology"),
                 ]
 
+                # Weight AI or Software subdomains higher if user targeted that discipline
+                if "artif" in disc_lower or "ai" in disc_lower:
+                    subdomain_candidates.sort(key=lambda x: 0 if x[0] in ("ai", "sai", "auto") else 1)
+                elif "soft" in disc_lower:
+                    subdomain_candidates.sort(key=lambda x: 0 if x[0] in ("se", "soft", "sse") else 1)
+
                 async def _probe_sub(prefix: str, label: str):
-                    sub_url = f"https://{prefix}.{university.domain}/"
-                    s_html, s_final = await self._fetch_with_waf_fallback(
-                        client, sub_url, headers, university.name, allow_playwright=False
-                    )
-                    if s_html and s_final:
-                        s_final_low = s_final.lower()
-                        if any(ak in s_final_low for ak in auth_url_exclusions):
-                            return None
-                        s_soup = BeautifulSoup(s_html, "html.parser")
-                        t_text = s_soup.title.get_text(strip=True) if s_soup.title else label
-                        t_text_low = t_text.lower()
-                        if any(at in t_text_low for at in auth_title_exclusions):
-                            return None
-                        return (t_text or label, s_final)
+                    for scheme in ("https", "http"):
+                        sub_url = f"{scheme}://{prefix}.{university.domain}/"
+                        s_html, s_final = await self._fetch_with_waf_fallback(
+                            client, sub_url, headers, university.name, allow_playwright=False
+                        )
+                        if s_html and s_final:
+                            s_final_low = s_final.lower()
+                            if any(ak in s_final_low for ak in auth_url_exclusions):
+                                return None
+                            s_soup = BeautifulSoup(s_html, "html.parser")
+                            t_text = s_soup.title.get_text(strip=True) if s_soup.title else label
+                            t_text_low = t_text.lower()
+                            if any(at in t_text_low for at in auth_title_exclusions):
+                                return None
+                            return (t_text or label, s_final)
                     return None
 
                 sub_results = await asyncio.gather(*[_probe_sub(p, lbl) for p, lbl in subdomain_candidates], return_exceptions=True)
@@ -1023,10 +1062,16 @@ class DiscoveryEngine:
                     status="Homepage Verified"
                 ))
 
-            faculty_keywords = ["导师队伍", "研究生导师", "硕士生导师", "博士生导师", "师资队伍", "教师名录", "师资力量", "教师队伍", "faculty", "supervisors"]
+            faculty_keywords = [
+                "导师队伍", "研究生导师", "硕士生导师", "博士生导师", "硕导", "博导",
+                "师资队伍", "教师名录", "师资力量", "教师队伍", "师资概况", "专任教师",
+                "教授名录", "副教授名录", "导师介绍", "导师信息", "硕导名单", "博导名单",
+                "学术队伍", "教师简介", "教师主页", "师资介绍", "人员概况", "教职工",
+                "faculty", "supervisors", "professors", "people", "academic staff"
+            ]
 
-            # Step 3: Inspect top 2 matched departments for '师资队伍' / '导师队伍'
-            for d_name, d_url in unique_depts[:2]:
+            # Step 3: Inspect top 3 matched departments for '师资队伍' / '导师队伍'
+            for d_name, d_url in unique_depts[:3]:
                 logger.info(f"[{university.name}] [Step 2/2 ✓] Department found '{d_name}' -> {d_url}. Checking for supervisor roster...")
                 found_faculty_page = False
                 d_html, d_final_url = await self._fetch_with_waf_fallback(

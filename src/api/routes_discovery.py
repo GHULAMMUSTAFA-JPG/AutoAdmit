@@ -167,13 +167,17 @@ async def resolve_departments_endpoint(request: ResolveDepartmentsRequest, user:
 
             if db_manager.is_connected and db_manager.db is not None:
                 try:
+                    import json
+                    dump_data = json.loads(updated_univ.model_dump_json())
+                    clean_dom = (updated_univ.domain or dom).lower().strip()
+                    dump_data["domain"] = clean_dom
                     await db_manager.get_collection("universities").update_one(
-                        {"domain": updated_univ.domain},
-                        {"$set": updated_univ.model_dump()},
+                        {"domain": clean_dom},
+                        {"$set": dump_data},
                         upsert=True
                     )
-                except Exception:
-                    pass
+                except Exception as db_err:
+                    logger.error(f"[{dom}] Failed to persist resolved university to MongoDB: {db_err}")
             return updated_univ
 
     resolved_list = await asyncio.gather(*[_probe_single_domain(dom) for dom in request.domains])

@@ -13,7 +13,7 @@ def test_p1_feasibility_scoring_tiers():
     assert tsinghua.tier == FeasibilityTier.TIER_1_DREAM
     assert tsinghua.is_project_985 is True
     assert "Dream" in tsinghua.feasibility_notes
-    assert "Associate Professors" in tsinghua.feasibility_notes
+    assert "Project 985" in tsinghua.feasibility_notes
 
     # Beihang -> Tier 2 (Target)
     buaa = discovery_engine.assess_university("buaa.edu.cn")

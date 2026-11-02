@@ -63,3 +63,4 @@ ok work on above and also the process completed so see logs and dont delete this
 5. **WAF Fast-Path & Campus WebVPN Filter:**
    - Restrained Playwright in `_fetch_with_waf_fallback`: generic network errors and timeouts fail fast and never trigger headless Playwright. Playwright is only invoked on explicit WAF challenge status codes (`403, 412, 429, 521`) or anti-bot challenge scripts.
    - Filtered campus WebVPN / CAS login URLs and titles (`login`, `authserver`, `webvpn`, `cas`, `统一身份认证`, etc.) from being recorded as academic department links.
+
