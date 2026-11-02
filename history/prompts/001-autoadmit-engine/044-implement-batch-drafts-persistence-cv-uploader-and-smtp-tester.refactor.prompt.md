@@ -62,3 +62,4 @@ Implemented the complete end-to-end multi-layer persistence, retry buttons with 
    - Implemented `SMTPEngine.test_smtp_connection()` and endpoint `POST /api/v1/dispatch/test-smtp`.
    - Added `btn-test-smtp` button with live ping feedback.
    - Added `btn-bulk-approve` button and backend `POST /api/v1/drafts/bulk-approve` for all drafts under 200 words.
+

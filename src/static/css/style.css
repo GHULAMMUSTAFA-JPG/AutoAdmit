@@ -1770,6 +1770,38 @@ body.enterprise-body {
   color: var(--primary-hover);
 }
 
+/* Compact Table Button & Action Styling */
+.btn-xs {
+  font-size: 0.72rem !important;
+  padding: 0.2rem 0.55rem !important;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+.table-uni-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+#matrix-table-view .enterprise-table thead th {
+  background: #f1f5f9;
+  border-bottom: 2px solid #cbd5e1;
+  font-weight: 700;
+  color: #334155;
+}
+
+#matrix-table-view .enterprise-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+#matrix-table-view .enterprise-table tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+
 
 
 

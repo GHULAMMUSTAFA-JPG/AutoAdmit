@@ -2077,7 +2077,25 @@ function applyMatrixTableFilter() {
     return;
   }
 
-  let filtered = allDirectoryUniversities.filter(u => {
+  // Merge verified pipeline statuses from live discovery table so Table 2 is always up-to-date
+  const mergedSource = (allDirectoryUniversities || []).map(u => {
+    const live = (lastDiscoveredUniversities || []).find(d => d.domain === u.domain);
+    if (live && live.pipeline_status && live.pipeline_status !== "Pending Live Check") {
+      return {
+        ...u,
+        pipeline_status: live.pipeline_status,
+        status_reason: live.status_reason || u.status_reason,
+        department_endpoints: (live.department_endpoints && live.department_endpoints.length > 0)
+          ? live.department_endpoints
+          : u.department_endpoints,
+        website: live.website || u.website,
+        website_verified: Boolean(live.website_verified || u.website_verified)
+      };
+    }
+    return u;
+  });
+
+  let filtered = mergedSource.filter(u => {
     if (regionVal !== "All" && u.region !== regionVal) return false;
     if (tierVal !== "All" && u.tier !== tierVal) return false;
     if (searchVal) {
@@ -2168,29 +2186,30 @@ function applyMatrixTableFilter() {
 
     tr.innerHTML = `
       <td class="col-num">${idx + 1}</td>
-      <td>
-        <div><strong>${u.name}</strong></div>
-        <div style="color: var(--text-secondary); font-size: 0.74rem;">${u.chinese_name || "-"}</div>
+      <td style="max-width: 220px;">
+        <div style="font-weight: 600; color: var(--text-primary); line-height: 1.35;">${u.name}</div>
       </td>
-      <td class="col-region"><span class="badge ${getRegionBadgeClass(u.region)}">${u.region || "National"}</span></td>
+      <td style="min-width: 175px;">
+        <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-bottom: 3px;">
+          <span class="badge ${getRegionBadgeClass(u.region)}">${u.region || "National"}</span>
+          <span class="badge ${getTierBadgeClass(u.tier)}">${u.tier || "Tier 3"}</span>
+        </div>
+        <div style="font-size: 0.72rem; color: var(--text-secondary);">${natClassHtml} · ${compNote}</div>
+      </td>
       <td>
         <div class="endpoint-chips-list">
           ${endpointsListHtml}
         </div>
       </td>
-      <td>
-        <div style="display: flex; gap: 0.35rem; align-items: center; margin-bottom: 2px;">
-          <span class="badge ${getTierBadgeClass(u.tier)}">${u.tier || "Tier 3"}</span>
-          ${natClassHtml}
-        </div>
-        <div style="font-size: 0.72rem; color: var(--text-secondary);">${compNote}</div>
-      </td>
-      <td>
+      <td style="min-width: 130px;">
         <div style="margin-bottom: 3px;">${feeHtml}</div>
         <div style="font-size: 0.72rem; color: var(--text-secondary);">${(u.scholarships_available || []).join(", ") || "Provincial / Presidential"}</div>
       </td>
-      <td style="max-width: 250px;">
+      <td style="min-width: 140px;">
         <div>${getPipelineStatusBadge(u.pipeline_status, u.status_reason)}</div>
+      </td>
+      <td class="col-action" style="text-align: center;">
+        <button class="btn btn-secondary btn-xs btn-interactive" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; line-height: 1.2;" onclick="resolveSingleUniversityDept('${u.domain}', this)" title="Live-probe Step 1 Homepage & Step 2 CS/AI Department">🧭 Probe</button>
       </td>
     `;
     tbody.appendChild(tr);
