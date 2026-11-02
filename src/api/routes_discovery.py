@@ -185,53 +185,90 @@ async def resolve_departments_endpoint(request: ResolveDepartmentsRequest, user:
 
 
 from src.core.database import db_manager
+import json
+from pathlib import Path
+
+SNAPSHOT_PATH = Path("data/universities_snapshot.json")
+
+def _save_snapshot(universities: List[University]) -> None:
+    try:
+        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        data = [u.model_dump(mode="json") for u in universities]
+        with open(SNAPSHOT_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save universities snapshot: {e}")
+
+def _load_snapshot() -> List[University]:
+    try:
+        if SNAPSHOT_PATH.exists():
+            with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+                raw_list = json.load(f)
+                return [discovery_engine.enrich_university_record(University(**item)) for item in raw_list]
+    except Exception as e:
+        logger.warning(f"Failed to load universities snapshot: {e}")
+    return []
 
 
 @router.get("/universities", response_model=List[University])
 async def get_universities_directory(user: str = Depends(get_current_user)):
-    """Returns directory of known Master's-granting universities strictly from MongoDB database (deduplicated)."""
+    """Returns directory of known Master's-granting universities strictly from MongoDB database (deduplicated) with snapshot fallback."""
     from src.services.discovery import VOCATIONAL_EXCLUSION_EN, VOCATIONAL_EXCLUSION_ZH
 
     if db_manager.is_connected and db_manager.db is not None:
-        cursor = db_manager.get_collection("universities").find({})
-        results = []
-        seen_domains = set()
-        seen_names = set()
-        stale_subdomain_ids = []
-        async for doc in cursor:
-            raw_id = doc.pop("_id", None)
-            dom = (doc.get("domain") or "").lower().strip()
-            if not dom.endswith(".edu.cn") and not dom.endswith(".ac.cn"):
-                continue
-            # Clean up any legacy 4-part subdomain entries (e.g. ar.shisu.edu.cn, en.bjtu.edu.cn)
-            parts = [p for p in dom.split(".") if p]
-            if len(parts) > 3:
-                if raw_id:
-                    stale_subdomain_ids.append(raw_id)
-                continue
-            en_low = (doc.get("name") or "").lower().strip()
-            zh_low = (doc.get("chinese_name") or "").lower().strip()
-            if any(v in zh_low for v in VOCATIONAL_EXCLUSION_ZH) or any(v in en_low for v in VOCATIONAL_EXCLUSION_EN):
-                continue
-            if dom in seen_domains or (en_low and en_low in seen_names):
-                if raw_id:
-                    stale_subdomain_ids.append(raw_id)
-                continue
-            seen_domains.add(dom)
-            if en_low:
-                seen_names.add(en_low)
-            u = discovery_engine.enrich_university_record(University(**doc))
-            results.append(u)
+        try:
+            cursor = db_manager.get_collection("universities").find({})
+            results = []
+            seen_domains = set()
+            seen_names = set()
+            stale_subdomain_ids = []
+            async for doc in cursor:
+                raw_id = doc.pop("_id", None)
+                dom = (doc.get("domain") or "").lower().strip()
+                if not dom.endswith(".edu.cn") and not dom.endswith(".ac.cn"):
+                    continue
+                parts = [p for p in dom.split(".") if p]
+                if len(parts) > 3 and not dom.startswith("www."):
+                    if raw_id:
+                        stale_subdomain_ids.append(raw_id)
+                    continue
+                en_low = (doc.get("name") or "").lower().strip()
+                zh_low = (doc.get("chinese_name") or "").lower().strip()
+                if any(v in zh_low for v in VOCATIONAL_EXCLUSION_ZH) or any(v in en_low for v in VOCATIONAL_EXCLUSION_EN):
+                    continue
+                if dom in seen_domains or (en_low and en_low in seen_names):
+                    if raw_id:
+                        stale_subdomain_ids.append(raw_id)
+                    continue
+                seen_domains.add(dom)
+                if en_low:
+                    seen_names.add(en_low)
+                u = discovery_engine.enrich_university_record(University(**doc))
+                results.append(u)
 
-        if stale_subdomain_ids:
-            try:
-                await db_manager.get_collection("universities").delete_many({"_id": {"$in": stale_subdomain_ids}})
-            except Exception:
-                pass
-        return results
+            if stale_subdomain_ids:
+                try:
+                    await db_manager.get_collection("universities").delete_many({"_id": {"$in": stale_subdomain_ids}})
+                except Exception:
+                    pass
+            if results:
+                _save_snapshot(results)
+                return results
+        except Exception as db_err:
+            logger.warning(f"MongoDB query failed in /universities: {db_err}")
 
-    # Offline/disconnected fallback returns empty list
-    return []
+    # Fallback Layer 2: Persistent local snapshot
+    snapshot = _load_snapshot()
+    if snapshot:
+        return snapshot
+
+    # Fallback Layer 3: Built-in 705 genuine institutions registry
+    fallback_records = discovery_engine.filter_universities(regions=None, source="combined")
+    for u in fallback_records:
+        if not u.department_endpoints:
+            u.department_endpoints = discovery_engine.discover_department_endpoints(u, "Computer Science")
+    _save_snapshot(fallback_records)
+    return fallback_records
 
 
 @router.post("/feasibility", response_model=List[University])

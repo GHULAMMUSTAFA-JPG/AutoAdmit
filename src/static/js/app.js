@@ -154,6 +154,7 @@ function loadAllData() {
   loadUniversities();
   loadFaculty();
   loadPrompts();
+  loadApplicantProfile();
   loadDrafts();
   loadDispatchQueue();
   loadAnalytics();
@@ -936,6 +937,19 @@ let stopBatchResolveRequested = false;
 let currentActiveBatchBtn = null;
 let currentBatchDefaultHtml = "";
 
+function stopBatchProbeExecution(btn = null) {
+  if (!isBatchResolving) {
+    pushInlineLog("INFO", "BatchResolver", "No batch probe is currently running.");
+    return;
+  }
+  stopBatchResolveRequested = true;
+  if (btn) btn.textContent = "⏳ Stopping after current...";
+  const stopBtn = document.getElementById("btn-stop-batch-probe");
+  if (stopBtn) stopBtn.textContent = "⏳ Stopping after current...";
+  if (currentActiveBatchBtn) currentActiveBatchBtn.textContent = "⏳ Stopping after current...";
+  pushInlineLog("WARNING", "BatchResolver", "⏸ Batch probe halt requested. Safe stop after current in-flight batch without data loss.");
+}
+
 async function executeBatchProbe(targets, modeLabel, triggerBtn, defaultHtml, stageTitle) {
   const btn = triggerBtn || document.getElementById("btn-resolve-depts");
 
@@ -1657,10 +1671,35 @@ async function loadUniversities(triggerBtn = null) {
     triggerBtn.classList.add("btn-loading");
     triggerBtn.textContent = "⏳ Loading...";
   }
+
+  // Instant Layer 3 Hydration from localStorage so page never opens blank
+  const cached = localStorage.getItem("cached_universities_directory");
+  if (cached && (!allDirectoryUniversities || allDirectoryUniversities.length === 0)) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        allDirectoryUniversities = parsed;
+        lastDiscoveredUniversities = parsed;
+        populateRegionFilterDropdown("matrix-region-filter", allDirectoryUniversities);
+        populateSupervisorPoolControls();
+        updateMatrixAnalyticsAndRegions();
+        applyMatrixTableFilter();
+        renderMatchedEndpoints(allDirectoryUniversities);
+      }
+    } catch (e) {}
+  }
+
   renderTableSkeleton("universities-tbody", 7, 8);
   try {
     const res = await fetchWithAuth("/api/v1/discovery/universities");
-    allDirectoryUniversities = await res.json();
+    const fetched = await res.json();
+    if (Array.isArray(fetched) && fetched.length > 0) {
+      allDirectoryUniversities = fetched;
+      lastDiscoveredUniversities = fetched;
+      try {
+        localStorage.setItem("cached_universities_directory", JSON.stringify(fetched));
+      } catch (e) {}
+    }
     populateRegionFilterDropdown("matrix-region-filter", allDirectoryUniversities);
     populateSupervisorPoolControls();
     updateMatrixAnalyticsAndRegions();
@@ -1668,10 +1707,7 @@ async function loadUniversities(triggerBtn = null) {
 
     // Automatically restore Section 01 (Discovered University Portals) & Raw/Normalized Audit from MongoDB across page refreshes!
     if (allDirectoryUniversities && allDirectoryUniversities.length > 0) {
-      if (!lastDiscoveredUniversities || lastDiscoveredUniversities.length === 0) {
-        lastDiscoveredUniversities = allDirectoryUniversities;
-        renderMatchedEndpoints(allDirectoryUniversities);
-      }
+      renderMatchedEndpoints(allDirectoryUniversities);
       loadLastDiscoveryAudit();
     }
   } catch (err) {
@@ -2248,6 +2284,13 @@ function applyFacultyTableFilter() {
     countBadge.textContent = `${filtered.length} / ${allFacultyRecords.length} Records`;
   }
 
+  filteredFacultyRecords = filtered;
+  const draftCandEl = document.getElementById("faculty-draft-candidate-count");
+  if (draftCandEl) {
+    const validEmails = filtered.filter(f => f.email && f.email.includes("@")).length;
+    draftCandEl.textContent = validEmails;
+  }
+
   tbody.innerHTML = "";
 
   if (!filtered || filtered.length === 0) {
@@ -2293,6 +2336,305 @@ function applyFacultyTableFilter() {
   });
 }
 
+let isGeneratingDrafts = false;
+let stopDraftsRequested = false;
+
+function stopDraftGeneration() {
+  if (!isGeneratingDrafts) return;
+  stopDraftsRequested = true;
+  const stopBtn = document.getElementById("btn-stop-draft-workers");
+  if (stopBtn) stopBtn.textContent = "⏳ Stopping after current batch...";
+  const btnDraftText = document.getElementById("btn-drafts-text");
+  if (btnDraftText) btnDraftText.textContent = "⏳ Stopping after batch...";
+  pushInlineLog("WARNING", "DraftGenerator", "⏸ Stop requested for Gemini draft generator. Halting cleanly after in-flight batch.");
+}
+
+async function generateDraftsForFilteredFaculty(triggerBtn = null) {
+  if (isGeneratingDrafts) {
+    stopDraftGeneration();
+    return;
+  }
+
+  const btn = triggerBtn || document.getElementById("btn-generate-faculty-drafts");
+  const spinner = document.getElementById("btn-drafts-spinner");
+  const textEl = document.getElementById("btn-drafts-text");
+  const stopBtn = document.getElementById("btn-stop-draft-workers");
+  const progCard = document.getElementById("sup-worker-progress-card");
+  const progBadge = document.getElementById("sup-tracker-badge");
+  const progTitle = document.getElementById("sup-tracker-title");
+  const progStats = document.getElementById("sup-tracker-stats");
+  const progBar = document.getElementById("sup-tracker-bar");
+  const progPct = document.getElementById("sup-tracker-pct");
+  const progDetail = document.getElementById("sup-tracker-detail");
+
+  const candidates = (filteredFacultyRecords && filteredFacultyRecords.length > 0 ? filteredFacultyRecords : allFacultyRecords).filter(f => f.email && f.email.includes("@"));
+
+  if (candidates.length === 0) {
+    alert("No supervisors with verified emails match the current filter. Crawl universities in Step 03 or adjust your filter first!");
+    return;
+  }
+
+  isGeneratingDrafts = true;
+  stopDraftsRequested = false;
+
+  const workerCount = 3;
+  const total = candidates.length;
+  let done = 0;
+  let generatedTotal = 0;
+
+  if (btn) {
+    btn.classList.add("btn-loading", "btn-danger");
+    btn.classList.remove("btn-primary");
+  }
+  if (spinner) spinner.classList.remove("hidden");
+  if (textEl) textEl.textContent = `⏹ Stop Draft Generator (0/${total} | ${workerCount}W)`;
+  if (stopBtn) {
+    stopBtn.classList.remove("hidden");
+    stopBtn.textContent = "⏹ Stop Drafts";
+  }
+  if (progCard) progCard.classList.remove("hidden");
+
+  pushInlineLog("INFO", "DraftGenerator", `🤖 Launching Gemini LLM Draft Generation across ${total} supervisors with ${workerCount} parallel workers...`);
+
+  try {
+    for (let i = 0; i < total; i += workerCount) {
+      if (stopDraftsRequested) {
+        pushInlineLog("WARNING", "DraftGenerator", `⏸ Draft generation paused by operator at ${done}/${total} supervisors.`);
+        break;
+      }
+
+      const chunk = candidates.slice(i, i + workerCount);
+      const chunkIds = chunk.map(c => c.id);
+      const chunkNames = chunk.map(c => c.name).join(", ");
+      const pct = Math.max(5, Math.round((done / total) * 100));
+
+      if (textEl) textEl.textContent = `⏹ Stop Draft Generator (${done}/${total} | ${workerCount}W)`;
+      if (progBadge) progBadge.textContent = `GEMINI SYNTHESIS ACTIVE`;
+      if (progTitle) progTitle.textContent = `Synthesizing batch (${done + 1}–${Math.min(done + chunk.length, total)} of ${total}): ${chunkNames}`;
+      if (progBar) progBar.style.width = `${pct}%`;
+      if (progPct) progPct.textContent = `${pct}% (${done} / ${total} Drafts Generated)`;
+      if (progDetail) progDetail.textContent = `Extracting lab digest & synthesizing personalized cold outreach (<200 words)...`;
+
+      try {
+        const res = await fetchWithAuth("/api/v1/drafts/generate-batch", {
+          method: "POST",
+          body: JSON.stringify({
+            professor_ids: chunkIds,
+            discipline: document.getElementById("sup-discipline-select")?.value || "Computer Science",
+            max_workers: workerCount
+          })
+        });
+        if (res.ok) {
+          const generatedList = await res.json();
+          generatedTotal += generatedList.length;
+          if (progStats) progStats.textContent = `${generatedTotal} Outreach Drafts Created`;
+          pushInlineLog("SUCCESS", "DraftGenerator", `✓ Generated ${generatedList.length} drafts for: ${chunkNames}`);
+        }
+      } catch (err) {
+        pushInlineLog("ERROR", "DraftGenerator", `Batch error on (${chunkNames}): ${err}`);
+      }
+
+      done += chunk.length;
+    }
+
+    if (stopDraftsRequested) {
+      if (progBadge) progBadge.textContent = `SYNTHESIS PAUSED`;
+      if (progTitle) progTitle.textContent = `Paused at ${done}/${total} drafts. Generated drafts are preserved in Review Workspace.`;
+    } else {
+      if (progBadge) progBadge.textContent = `SYNTHESIS COMPLETE`;
+      if (progTitle) progTitle.textContent = `Completed Gemini draft generation for ${total} supervisors!`;
+      if (progBar) progBar.style.width = `100%`;
+      if (progPct) progPct.textContent = `100% (${total}/${total} Generated)`;
+      pushInlineLog("SUCCESS", "DraftGenerator", `✓ Finished generating drafts for ${total} supervisors. Ready for review in Tab 05!`);
+    }
+  } finally {
+    isGeneratingDrafts = false;
+    stopDraftsRequested = false;
+
+    if (btn) {
+      btn.classList.remove("btn-loading", "btn-danger");
+      btn.classList.add("btn-primary");
+    }
+    if (spinner) spinner.classList.add("hidden");
+    if (textEl) textEl.innerHTML = `🤖 Generate Gemini Drafts for Filtered Faculty (<span id="faculty-draft-candidate-count">${candidates.length}</span>)`;
+    if (stopBtn) stopBtn.classList.add("hidden");
+    loadDrafts();
+  }
+}
+
+// Applicant CV & Background Context Management
+async function loadApplicantProfile() {
+  try {
+    const res = await fetchWithAuth("/api/v1/prompts/applicant-profile");
+    if (res.ok) {
+      const p = await res.json();
+      const nameEl = document.getElementById("app-full-name");
+      const degEl = document.getElementById("app-degree");
+      const projEl = document.getElementById("app-projects");
+      const pubEl = document.getElementById("app-pubs");
+      const cvBadge = document.getElementById("cv-status-badge");
+      const fnLabel = document.getElementById("cv-filename-label");
+
+      if (nameEl && p.name) nameEl.value = p.name;
+      if (degEl && p.degree) degEl.value = p.degree;
+      if (projEl && p.key_projects) projEl.value = (p.key_projects || []).join(", ");
+      if (pubEl && p.publications) pubEl.value = (p.publications || []).join("; ");
+      if (cvBadge) {
+        if (p.cv_filename) {
+          cvBadge.className = "badge badge-tier-1";
+          cvBadge.textContent = `✓ CV: ${p.cv_filename}`;
+        }
+      }
+      if (fnLabel && p.cv_filename) {
+        fnLabel.textContent = `Loaded: ${p.cv_filename} (${(p.cv_raw_text || "").length} characters parsed via PyMuPDF)`;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not load applicant profile:", err);
+  }
+}
+
+async function saveApplicantProfile(btnEl = null) {
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "⏳ Saving...";
+  }
+
+  const nameVal = document.getElementById("app-full-name")?.value || "Applicant";
+  const degVal = document.getElementById("app-degree")?.value || "B.S. in Computer Science";
+  const projRaw = document.getElementById("app-projects")?.value || "";
+  const pubRaw = document.getElementById("app-pubs")?.value || "";
+
+  const projects = projRaw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+  const pubs = pubRaw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+
+  try {
+    const res = await fetchWithAuth("/api/v1/prompts/applicant-profile", {
+      method: "POST",
+      body: JSON.stringify({
+        name: nameVal,
+        degree: degVal,
+        key_projects: projects,
+        publications: pubs
+      })
+    });
+    if (res.ok) {
+      pushInlineLog("SUCCESS", "ApplicantProfile", "✓ Applicant CV & technical context saved to MongoDB.");
+      alert("Applicant Profile Context saved! Gemini will now personalize outreach using your real projects and publications.");
+    }
+  } catch (err) {
+    alert("Error saving profile: " + err);
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "💾 Save Profile to DB";
+    }
+  }
+}
+
+async function uploadApplicantCv(inputEl) {
+  if (!inputEl || !inputEl.files || inputEl.files.length === 0) return;
+  const file = inputEl.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const cvBadge = document.getElementById("cv-status-badge");
+  const fnLabel = document.getElementById("cv-filename-label");
+  if (cvBadge) cvBadge.textContent = "⏳ Uploading & Parsing...";
+
+  try {
+    const token = getAuthToken();
+    const res = await fetch("/api/v1/prompts/upload-cv", {
+      method: "POST",
+      headers: token ? { "Authorization": `Bearer ${token}` } : {},
+      body: formData
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      if (cvBadge) {
+        cvBadge.className = "badge badge-tier-1";
+        cvBadge.textContent = `✓ CV: ${updated.cv_filename}`;
+      }
+      if (fnLabel) {
+        fnLabel.textContent = `Uploaded ${updated.cv_filename} (${(updated.cv_raw_text || "").length} characters parsed via PyMuPDF)`;
+      }
+      pushInlineLog("SUCCESS", "ApplicantProfile", `✓ Uploaded CV '${updated.cv_filename}'. Background parsed for Gemini.`);
+      alert(`CV '${updated.cv_filename}' successfully parsed! Its content is now active for all Gemini draft syntheses.`);
+    }
+  } catch (err) {
+    alert("CV upload error: " + err);
+    if (cvBadge) cvBadge.textContent = "Upload Failed";
+  }
+}
+
+async function bulkApproveValidDrafts(btnEl = null) {
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "⏳ Approving...";
+  }
+
+  try {
+    const res = await fetchWithAuth("/api/v1/drafts/bulk-approve", {
+      method: "POST",
+      body: JSON.stringify({ max_words: 200 })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      pushInlineLog("SUCCESS", "ReviewWorkspace", `✓ Bulk approved ${data.approved_count} valid outreach drafts.`);
+      alert(`Bulk approval complete! ${data.approved_count} drafts approved and moved to Outbox Dispatcher (Tab 06).`);
+      loadDrafts();
+      loadDispatchQueue();
+    }
+  } catch (err) {
+    alert("Bulk approval error: " + err);
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "✓ Bulk Approve Valid Drafts (<200 Words)";
+    }
+  }
+}
+
+async function testSmtpConnection(btnEl = null) {
+  const resultEl = document.getElementById("smtp-test-result");
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "⏳ Testing Connection...";
+  }
+  if (resultEl) {
+    resultEl.textContent = "Attempting SMTP handshake & authentication...";
+    resultEl.style.color = "var(--text-secondary)";
+  }
+
+  try {
+    const res = await fetchWithAuth("/api/v1/dispatch/test-smtp", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      if (resultEl) {
+        resultEl.textContent = `✓ ${data.message} (Sandbox: ${data.sandbox_mode ? "ON" : "OFF"})`;
+        resultEl.style.color = "#10b981";
+      }
+      pushInlineLog("SUCCESS", "DispatchEngine", `✓ Live SMTP Connection Verified: ${data.message}`);
+    } else {
+      if (resultEl) {
+        resultEl.textContent = `✗ ${data.message}`;
+        resultEl.style.color = "#ef4444";
+      }
+      pushInlineLog("ERROR", "DispatchEngine", `✗ SMTP Test Failed: ${data.message}`);
+    }
+  } catch (err) {
+    if (resultEl) {
+      resultEl.textContent = `✗ Connection error: ${err}`;
+      resultEl.style.color = "#ef4444";
+    }
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "🔌 Test Live SMTP Connection";
+    }
+  }
+}
+
 // Section 4: Email Review Workspace
 async function loadDrafts() {
   try {
@@ -2308,6 +2650,10 @@ async function loadDrafts() {
       opt.textContent = `[${d.status}] ${d.recipient_name} — ${d.university}`;
       select.appendChild(opt);
     });
+
+    const pendingCount = (currentDrafts || []).filter(d => d.status === "PENDING_REVIEW").length;
+    const pendingBadge = document.getElementById("pending-drafts-badge");
+    if (pendingBadge) pendingBadge.textContent = `${pendingCount} Pending Drafts`;
 
     if (currentDrafts.length > 0 && !selectedDraft) {
       select.value = currentDrafts[0].id;

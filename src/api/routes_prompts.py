@@ -175,3 +175,128 @@ async def activate_prompt(prompt_id: str, user: str = Depends(get_current_user))
     logger.info(f"Activated prompt '{target.id}' for stage '{target.stage}'")
     return target
 
+
+from pydantic import BaseModel
+from typing import Optional
+from fastapi import UploadFile, File
+
+class ApplicantProfile(BaseModel):
+    name: str = "Applicant"
+    cgpa: float = 2.68
+    degree: str = "B.S. in Computer Science"
+    research_interests: List[str] = ["Computer Vision", "Deep Learning", "Applied AI"]
+    key_projects: List[str] = ["PyTorch Model Optimization", "Vision Transformer Pipeline"]
+    publications: List[str] = []
+    cv_raw_text: Optional[str] = None
+    cv_filename: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+# Default in-memory profile
+active_applicant_profile = ApplicantProfile(
+    name="Prospective Scholar",
+    cgpa=2.68,
+    degree="B.S. in Computer Science",
+    research_interests=["Computer Vision", "Deep Learning", "Vision-Language Models", "Robotics"],
+    key_projects=["Real-time Object Detection with PyTorch", "Lightweight Edge AI Inference Engine"],
+    publications=["Applied Deep Learning for Embedded Vision (Under Review)"],
+    cv_raw_text="Experienced in PyTorch, Python, computer vision architectures, and autonomous AI systems."
+)
+
+@router.get("/applicant-profile", response_model=ApplicantProfile)
+async def get_applicant_profile_endpoint(user: str = Depends(get_current_user)):
+    """Returns stored Applicant CV & Profile Context from MongoDB or active memory."""
+    if db_manager.is_connected and db_manager.db is not None:
+        try:
+            doc = await db_manager.get_collection("applicant_profile").find_one({"id": "primary_profile"})
+            if doc:
+                doc.pop("_id", None)
+                doc.pop("id", None)
+                return ApplicantProfile(**doc)
+        except Exception:
+            pass
+    return active_applicant_profile
+
+
+@router.post("/applicant-profile", response_model=ApplicantProfile)
+async def save_applicant_profile_endpoint(
+    profile: ApplicantProfile,
+    user: str = Depends(get_current_user)
+):
+    """Saves updated Applicant CV & Profile Context into MongoDB."""
+    global active_applicant_profile
+    profile.updated_at = datetime.now(timezone.utc)
+    active_applicant_profile = profile
+
+    if db_manager.is_connected and db_manager.db is not None:
+        try:
+            doc = profile.model_dump()
+            doc["id"] = "primary_profile"
+            await db_manager.get_collection("applicant_profile").update_one(
+                {"id": "primary_profile"},
+                {"$set": doc},
+                upsert=True
+            )
+        except Exception as err:
+            logger.error(f"Failed to persist applicant profile: {err}")
+
+    logger.info(f"Applicant profile saved successfully ({profile.name}, {len(profile.key_projects)} projects).")
+    return profile
+
+
+@router.post("/upload-cv", response_model=ApplicantProfile)
+async def upload_applicant_cv_endpoint(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user)
+):
+    """Uploads applicant CV (.pdf, .txt, .md), extracts text via PyMuPDF/UTF-8, and updates profile context."""
+    global active_applicant_profile
+    filename = file.filename or "cv_document"
+    contents = await file.read()
+    raw_text = ""
+
+    if filename.lower().endswith(".pdf"):
+        try:
+            import fitz
+            doc = fitz.open(stream=contents, filetype="pdf")
+            extracted = []
+            for page in doc:
+                extracted.append(page.get_text())
+            raw_text = "\n".join(extracted).strip()
+        except Exception as e:
+            raw_text = f"PDF text extraction note: {e}"
+    else:
+        try:
+            raw_text = contents.decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_text = str(contents)[:2000]
+
+    active_applicant_profile.cv_raw_text = raw_text
+    active_applicant_profile.cv_filename = filename
+    active_applicant_profile.updated_at = datetime.now(timezone.utc)
+
+    # Save to disk as durable local backup
+    try:
+        from pathlib import Path
+        save_dir = Path("data/uploads")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        save_path = save_dir / filename
+        with open(save_path, "wb") as f:
+            f.write(contents)
+    except Exception:
+        pass
+
+    if db_manager.is_connected and db_manager.db is not None:
+        try:
+            doc = active_applicant_profile.model_dump()
+            doc["id"] = "primary_profile"
+            await db_manager.get_collection("applicant_profile").update_one(
+                {"id": "primary_profile"},
+                {"$set": doc},
+                upsert=True
+            )
+        except Exception as err:
+            logger.error(f"Failed to persist uploaded CV profile: {err}")
+
+    logger.info(f"Uploaded CV '{filename}' parsed ({len(raw_text)} chars).")
+    return active_applicant_profile
+

@@ -322,7 +322,7 @@
           </div>
 
           <!-- Discovered Universities Table & Live Logs Toggle Container -->
-          <div id="discovered-endpoints-container" class="results-container mt-3 hidden">
+          <div id="discovered-endpoints-container" class="results-container mt-3">
             <div class="table-action-header">
               <div class="header-meta">
                 <h3>Discovered University Portals (<span id="matched-univ-count" class="highlight-count">0</span> Institutions)</h3>
@@ -341,6 +341,7 @@
                 <button id="btn-resolve-depts" class="btn btn-primary btn-sm btn-interactive" onclick="resolveRealDepartmentsForVisible(this)" title="Crawls verified homepages (院系设置) in parallel to find real CS/AI department & supervisor URLs">🧭 Resolve Real Dept Links</button>
                 <button id="btn-retry-step1-failed" class="btn btn-danger btn-sm btn-interactive" onclick="retryFailedStep1Universities(this)" title="Retries universities where Step 1 Homepage probe failed, timed out, or was blocked by WAF">🔄 Retry Step 1 Failed (<span id="retry-s1-count">0</span>)</button>
                 <button id="btn-retry-step2-missing" class="btn btn-warning btn-sm btn-interactive" onclick="retryMissingStep2Universities(this)" title="Retries universities where Step 1 Homepage succeeded (200 OK) but Step 2 CS/AI department or supervisor roster was not found">🧭 Retry Missing Dept/Roster (<span id="retry-s2-count">0</span>)</button>
+                <button id="btn-stop-batch-probe" class="btn btn-outline-danger btn-sm btn-interactive" onclick="stopBatchProbeExecution(this)" title="Immediately stops any ongoing batch probe or retry after current university">⏹ Stop Probe</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="runRegionalFilter(this)">↻ Refresh</button>
                 <button class="btn btn-secondary btn-sm btn-interactive" onclick="clearDiscoveredUniversities()">Clear</button>
                 <button class="btn btn-success btn-sm btn-interactive" onclick="scrollToSupervisorPool()">👨‍🏫 Step 03: Harvest Supervisors ➔</button>
@@ -648,10 +649,14 @@
                   </select>
                 </div>
 
-                <div class="search-action-box mt-3">
+                <div class="search-action-box mt-3" style="display: flex; gap: 0.5rem; flex-direction: column;">
                   <button id="btn-launch-sup-workers" class="btn btn-success btn-block btn-interactive" onclick="launchSupervisorWorkerPool()">
                     <span id="btn-sup-spinner" class="spinner-inline hidden"></span>
                     <span id="btn-sup-text">🚀 Launch Parallel Supervisor Workers</span>
+                  </button>
+                  <button id="btn-generate-faculty-drafts" class="btn btn-primary btn-block btn-interactive" onclick="generateDraftsForFilteredFaculty(this)" title="Runs Gemini LLM Agent across all visible/filtered supervisors (e.g. all 硕导 in Jiangsu) to generate research digests and outreach drafts with 3 workers">
+                    <span id="btn-drafts-spinner" class="spinner-inline hidden"></span>
+                    <span id="btn-drafts-text">🤖 Generate Gemini Drafts for Filtered Faculty (<span id="faculty-draft-candidate-count">0</span>)</span>
                   </button>
                 </div>
               </div>
@@ -671,6 +676,7 @@
               <div class="tracker-actions">
                 <span id="sup-tracker-stats" class="badge badge-tier-3 mr-2">0 Supervisors Found</span>
                 <button id="btn-stop-sup-workers" class="btn btn-danger btn-sm ml-1" onclick="stopSupervisorWorkerPool()">⏹ Stop Workers</button>
+                <button id="btn-stop-draft-workers" class="btn btn-danger btn-sm ml-1 hidden" onclick="stopDraftGeneration()">⏹ Stop Drafts</button>
                 <button class="btn btn-secondary btn-sm ml-1" onclick="switchFacultyView('logs')">📜 View Live Worker Logs</button>
               </div>
             </div>
@@ -777,6 +783,45 @@
           <div class="intro-headline">
             <h2>Prompt Management & Custom AI Directives</h2>
             <p class="subtitle">Provide, view, edit, and version the system and user prompt templates used for research summarization and cold outreach generation. All edits persist in MongoDB in real time.</p>
+          </div>
+
+          <!-- Applicant Profile & CV Document Uploader (Injected into Gemini Cold Outreach) -->
+          <div id="applicant-profile-card" class="filter-panel mt-3">
+            <div class="flex-between">
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 600; color: var(--text-primary); margin: 0;">🎓 Applicant CV & Background Context</h3>
+                <p class="subtitle" style="margin: 0.2rem 0 0.6rem 0;">Upload your CV (.pdf, .txt, .md) or specify your real publications and hands-on projects so Gemini cites your genuine technical background in every generated outreach email.</p>
+              </div>
+              <span id="cv-status-badge" class="badge badge-primary">No CV Uploaded</span>
+            </div>
+            <div class="form-grid-3 mt-2">
+              <div class="form-group">
+                <label for="app-full-name">Applicant Full Name:</label>
+                <input type="text" id="app-full-name" class="form-control" placeholder="e.g. John Doe" />
+
+                <label for="app-degree" class="mt-2">Target Degree & Major:</label>
+                <input type="text" id="app-degree" class="form-control" placeholder="e.g. Master's in Computer Science & Technology" />
+              </div>
+
+              <div class="form-group">
+                <label for="app-projects">Top Projects (Comma-separated):</label>
+                <textarea id="app-projects" class="form-control" rows="3" placeholder="e.g. PyTorch Transformer Optimization, Edge Vision Pipeline, Autonomous Navigation"></textarea>
+
+                <label for="app-pubs" class="mt-2">Publications & Preprints:</label>
+                <input type="text" id="app-pubs" class="form-control" placeholder="e.g. Applied AI in Edge Computing (Under Review)" />
+              </div>
+
+              <div class="form-group flex-col-between">
+                <div>
+                  <label for="cv-file-input">Upload CV (.PDF, .MD, .TXT):</label>
+                  <input type="file" id="cv-file-input" class="form-control mt-1" accept=".pdf,.txt,.md" onchange="uploadApplicantCv(this)" />
+                  <span id="cv-filename-label" class="form-hint mt-1" style="display:block;">Supports direct PyMuPDF text parsing</span>
+                </div>
+                <div class="mt-2">
+                  <button id="btn-save-applicant-profile" class="btn btn-success btn-block btn-interactive" onclick="saveApplicantProfile(this)">💾 Save Profile to DB</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="prompts-manager-layout mt-3">
@@ -911,6 +956,18 @@
             </div>
           </div>
 
+          <!-- Bulk Draft Approval Toolbar -->
+          <div class="bulk-draft-actions-bar mt-3 flex-between" style="background: var(--bg-surface-secondary); padding: 0.6rem 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            <div class="flex-align-center">
+              <span class="badge badge-primary mr-2" id="pending-drafts-badge">0 Pending Drafts</span>
+              <span style="font-size: 0.82rem; color: var(--text-secondary);">One-click batch approval stages all valid drafts (&lt;200 words) directly into the Outbox Queue.</span>
+            </div>
+            <div>
+              <button id="btn-bulk-approve" class="btn btn-success btn-sm btn-interactive" onclick="bulkApproveValidDrafts(this)">✓ Bulk Approve Valid Drafts (&lt;200 Words)</button>
+              <button class="btn btn-secondary btn-sm ml-1" onclick="loadDrafts()">↻ Refresh Drafts</button>
+            </div>
+          </div>
+
           <div class="split-pane-layout mt-3">
             <!-- Left Pane: Synthesized Research Digest -->
             <div class="pane-column pane-summary">
@@ -1000,6 +1057,10 @@
               <div class="btn-group mt-3">
                 <button class="btn btn-primary" onclick="sendBatch(false)">🚀 Dispatch Batch (With Jitter)</button>
                 <button class="btn btn-secondary" onclick="sendBatch(true)">🧪 Dry-Run Test Batch</button>
+              </div>
+              <div class="mt-2">
+                <button id="btn-test-smtp" class="btn btn-outline-primary btn-sm btn-block btn-interactive" onclick="testSmtpConnection(this)">🔌 Test Live SMTP Connection</button>
+                <span id="smtp-test-result" class="form-hint mt-1" style="display:block;"></span>
               </div>
             </div>
 

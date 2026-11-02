@@ -42,6 +42,20 @@ def get_cst_status(user: str = Depends(get_current_user)):
     }
 
 
+@router.post("/test-smtp")
+def test_smtp_endpoint(user: str = Depends(get_current_user)):
+    """Verifies live outbound SMTP server connection, STARTTLS/SSL, and authentication credentials."""
+    success, message = smtp_engine.test_smtp_connection()
+    return {
+        "success": success,
+        "message": message,
+        "smtp_host": settings.SMTP_HOST,
+        "smtp_port": settings.SMTP_PORT,
+        "smtp_user": settings.SMTP_USER,
+        "sandbox_mode": settings.SANDBOX_MODE
+    }
+
+
 @router.get("/queue", response_model=List[OutreachDraft])
 async def get_dispatch_queue(user: str = Depends(get_current_user)):
     """Returns drafts currently staged for dispatch (status == APPROVED)."""

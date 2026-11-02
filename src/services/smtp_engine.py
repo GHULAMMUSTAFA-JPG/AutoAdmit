@@ -197,6 +197,27 @@ class SMTPEngine:
 
         return dispatched
 
+    def test_smtp_connection(self) -> Tuple[bool, str]:
+        """Verifies SMTP host connection and authentication without sending any email."""
+        if not settings.SMTP_HOST:
+            return False, "SMTP_HOST is not configured in .env."
+        try:
+            if settings.SMTP_PORT == 465:
+                server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
+            else:
+                server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
+                server.ehlo()
+                if server.has_extn("STARTTLS"):
+                    server.starttls()
+                    server.ehlo()
+
+            if settings.SMTP_USER and settings.SMTP_PASS:
+                server.login(settings.SMTP_USER, settings.SMTP_PASS)
+            server.quit()
+            return True, f"Successfully connected & authenticated to {settings.SMTP_HOST}:{settings.SMTP_PORT} ({settings.SMTP_USER})"
+        except Exception as e:
+            return False, f"SMTP Connection Failed: {e}"
+
 
 smtp_engine = SMTPEngine()
 

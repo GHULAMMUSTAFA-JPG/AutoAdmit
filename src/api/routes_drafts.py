@@ -180,3 +180,108 @@ async def regenerate_draft(
     logger.info(f"Regenerated draft '{draft.id}' via Gemini LLM.")
     return new_draft
 
+
+class BatchGenerateDraftsRequest(BaseModel):
+    professor_ids: Optional[List[str]] = None
+    discipline: str = "Computer Science"
+    max_workers: int = 3
+
+
+class BulkApproveRequest(BaseModel):
+    draft_ids: Optional[List[str]] = None
+    max_words: int = 200
+
+
+@router.post("/generate-batch", response_model=List[OutreachDraft])
+async def generate_drafts_batch_endpoint(
+    request: BatchGenerateDraftsRequest,
+    user: str = Depends(get_current_user)
+):
+    """
+    Batch-generates factual research digests and high-conversion cold outreach drafts
+    using Gemini LLM across targeted professors with 1-3 parallel workers.
+    """
+    import asyncio
+
+    target_profs: List[FacultyProfile] = []
+    if request.professor_ids:
+        if db_manager.is_connected and db_manager.db is not None:
+            cursor = db_manager.get_collection("professors").find({"id": {"$in": request.professor_ids}})
+            async for doc in cursor:
+                doc.pop("_id", None)
+                target_profs.append(FacultyProfile(**doc))
+    else:
+        # Default: take up to 30 pending professors with verified emails
+        if db_manager.is_connected and db_manager.db is not None:
+            cursor = db_manager.get_collection("professors").find({"email": {"$regex": r"@.*\.edu\.cn"}}).limit(30)
+            async for doc in cursor:
+                doc.pop("_id", None)
+                target_profs.append(FacultyProfile(**doc))
+
+    if not target_profs:
+        return []
+
+    worker_pool = min(3, max(1, request.max_workers))
+    sem = asyncio.Semaphore(worker_pool)
+
+    async def _process_single_prof(prof: FacultyProfile) -> Optional[OutreachDraft]:
+        async with sem:
+            try:
+                digest = await llm_agent.generate_research_digest(prof)
+                draft = await llm_agent.generate_outreach_draft(prof, digest)
+                drafts_cache[draft.id] = draft
+                if db_manager.is_connected and db_manager.db is not None:
+                    await db_manager.get_collection("outreach_drafts").update_one(
+                        {"professor_id": prof.id},
+                        {"$set": draft.model_dump()},
+                        upsert=True
+                    )
+                return draft
+            except Exception as err:
+                logger.error(f"Failed to generate draft for professor {prof.name} ({prof.id}): {err}")
+                return None
+
+    results = await asyncio.gather(*[_process_single_prof(p) for p in target_profs])
+    return [r for r in results if r is not None]
+
+
+@router.post("/bulk-approve")
+async def bulk_approve_drafts_endpoint(
+    request: BulkApproveRequest,
+    user: str = Depends(get_current_user)
+):
+    """
+    Bulk-promotes all eligible PENDING_REVIEW drafts with word count <= max_words
+    to APPROVED status so they are staged for outbound SMTP dispatch.
+    """
+    approved_count = 0
+    now = datetime.now(timezone.utc)
+
+    filter_query: dict = {"status": DraftStatus.PENDING_REVIEW}
+    if request.draft_ids:
+        filter_query["id"] = {"$in": request.draft_ids}
+
+    if db_manager.is_connected and db_manager.db is not None:
+        cursor = db_manager.get_collection("outreach_drafts").find(filter_query)
+        async for doc in cursor:
+            body = doc.get("body_text", "")
+            words = len(body.split())
+            if words <= request.max_words:
+                await db_manager.get_collection("outreach_drafts").update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"status": DraftStatus.APPROVED, "approved_at": now}}
+                )
+                approved_count += 1
+                if doc.get("id") in drafts_cache:
+                    drafts_cache[doc["id"]].status = DraftStatus.APPROVED
+                    drafts_cache[doc["id"]].approved_at = now
+    else:
+        for d in drafts_cache.values():
+            if d.status == DraftStatus.PENDING_REVIEW and len(d.body_text.split()) <= request.max_words:
+                d.status = DraftStatus.APPROVED
+                d.approved_at = now
+                approved_count += 1
+
+    logger.info(f"Bulk-approved {approved_count} drafts for outbound dispatch.")
+    return {"approved_count": approved_count, "status": "success"}
+
