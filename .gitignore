@@ -1,5 +1,7 @@
 # Environment & secrets
 .env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 *$py.class
@@ -17,3 +19,11 @@ htmlcov/
 .playwright/
 test-results/
 
+# Spec-driven development & agent lineage (keep repository purely for application code)
+.specify/
+specs/
+history/
+
+# Root markdown documents (keep only README.md)
+/*.md
+!/README.md
