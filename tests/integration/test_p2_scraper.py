@@ -69,3 +69,23 @@ def test_p2_supervisor_qualification_filtering():
 
     assert rejected_profile is None
 
+    # 3. Inherited breadcrumb qualification (from Phase 1 '硕士生导师' directory) when profile omits explicit marker
+    inherited_html = """
+    <html><head><title>张伟 - 计算机学院</title></head>
+    <body>
+      <h1>张伟</h1>
+      <p>邮箱：zhangwei [at] tsinghua.edu.cn</p>
+      <p>研究方向：人工智能、计算机视觉</p>
+    </body></html>
+    """
+    inherited_profile = harvester.parse_profile_html(
+        html=inherited_html,
+        source_url="https://cs.tsinghua.edu.cn/prof/zhangwei",
+        university_name="Tsinghua University",
+        inherited_qualification=SupervisorQualification.MASTERS_SUPERVISOR,
+    )
+    assert inherited_profile is not None
+    assert inherited_profile.qualification == SupervisorQualification.MASTERS_SUPERVISOR
+    assert inherited_profile.email == "zhangwei@tsinghua.edu.cn"
+
+

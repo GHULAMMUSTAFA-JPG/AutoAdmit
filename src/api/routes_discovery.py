@@ -5,14 +5,22 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from src.api.deps import get_current_user
+from src.core.logger import setup_logger
+from src.core.policies import policy_manager
+from src.core.telemetry import JobScorecard, TerminalStatus
 from src.models.university import (
     DepartmentEndpoint,
+    Phase1JobProgress,
+    Phase1JobRecord,
     PreRunCostEstimate,
     University,
+    UniversityDepartmentCache,
 )
 from src.services.discovery import (
     discovery_engine,
 )
+
+logger = setup_logger("DiscoveryAPI")
 
 router = APIRouter(prefix="/api/v1/discovery", tags=["Discovery"])
 
@@ -323,4 +331,214 @@ def approve_cost_gate(user: str = Depends(get_current_user)):
     approved_estimate = discovery_engine.approve_estimate(estimate)
     active_estimates[estimate_id] = (approved_estimate, endpoints)
     return approved_estimate
+
+
+# ------------------------------------------------------------------ Phase 1 Async Jobs, Scorecard & Review Queue
+import asyncio
+from datetime import datetime, timezone
+import time
+import uuid
+
+phase1_jobs_store: dict[str, Phase1JobRecord] = {}
+
+
+class CreatePhase1JobRequest(BaseModel):
+    discipline: str = "Computer Science"
+    disciplines: Optional[List[str]] = None
+    degree: str = "master"
+    top_n: int = 25
+    regions: Optional[List[str]] = None
+    tiers: Optional[List[str]] = None
+    domains: Optional[List[str]] = None
+    force_refresh: bool = False
+    run_sync: bool = False
+
+
+class UpdatePolicyRequest(BaseModel):
+    enable_search_api: Optional[bool] = None
+    enable_playwright: Optional[bool] = None
+    monthly_search_cap: Optional[int] = None
+    reset_search_counter: bool = False
+
+
+async def _persist_job(job: Phase1JobRecord) -> None:
+    phase1_jobs_store[job.job_id] = job
+    if db_manager.is_connected and db_manager.db is not None:
+        payload = json.loads(job.model_dump_json())
+        await db_manager.get_collection("phase1_jobs").update_one(
+            {"job_id": job.job_id},
+            {"$set": payload},
+            upsert=True,
+        )
+
+
+async def _execute_phase1_job(
+    job_id: str,
+    target_universities: List[University],
+    target_disciplines: List[str],
+    force_refresh: bool,
+) -> None:
+    job = phase1_jobs_store[job_id]
+    job.status = "RUNNING"
+    await _persist_job(job)
+
+    total_tasks = len(target_universities) * len(target_disciplines)
+    scorecard = JobScorecard(job_id=job_id, target_universities=total_tasks)
+    t_job_start = time.monotonic()
+
+    sem = asyncio.Semaphore(5)
+
+    async def _process_one(univ: University, disc: str) -> None:
+        async with sem:
+            rec = await discovery_engine.discover_department_4layer(
+                university=univ,
+                discipline=disc,
+                trace_id=job_id,
+                force_refresh=force_refresh,
+                scorecard=scorecard,
+            )
+            job.results.append(rec)
+            job.progress.processed += 1
+            if rec.status in (TerminalStatus.COMPLETE.value, TerminalStatus.PARTIAL.value):
+                job.progress.succeeded += 1
+            else:
+                job.progress.failed += 1
+            scorecard.total_duration_sec = time.monotonic() - t_job_start
+            job.scorecard = scorecard.to_dict()
+            # Checkpoint after every completed (university, discipline)
+            await _persist_job(job)
+
+    tasks = [
+        _process_one(u, d)
+        for u in target_universities
+        for d in target_disciplines
+    ]
+    await asyncio.gather(*tasks)
+
+    scorecard.total_duration_sec = time.monotonic() - t_job_start
+    job.scorecard = scorecard.to_dict()
+    job.status = "COMPLETED"
+    job.completed_at = datetime.now(timezone.utc)
+    await _persist_job(job)
+
+
+@router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
+async def create_discovery_job(request: CreatePhase1JobRequest, user: str = Depends(get_current_user)):
+    """
+    Launches an asynchronous Phase 1 Discovery Job with bounded concurrency, per-domain rate limiting,
+    entity-level TTL caching, checkpointing, and a self-measuring Run Scorecard.
+    """
+    target_disciplines = [d.strip() for d in (request.disciplines or [request.discipline]) if d and d.strip()]
+    if not target_disciplines:
+        target_disciplines = ["Computer Science"]
+
+    if request.domains:
+        target_universities = [discovery_engine.assess_university(dom) for dom in request.domains]
+    else:
+        matched = discovery_engine.filter_universities(
+            regions=request.regions,
+            tiers=request.tiers,
+            source="combined",
+        )
+        # Rank by subject_rankings (if available), then tier
+        matched.sort(key=lambda u: (u.cs_ranking if u.cs_ranking is not None else 999, u.name))
+        target_universities = matched[: max(1, min(request.top_n, 100))]
+
+    job_id = f"job_{uuid.uuid4().hex[:8]}"
+    total_tasks = len(target_universities) * len(target_disciplines)
+    job = Phase1JobRecord(
+        job_id=job_id,
+        query_params={
+            "disciplines": target_disciplines,
+            "degree": request.degree,
+            "top_n": request.top_n,
+            "regions": request.regions,
+            "tiers": request.tiers,
+            "domains": [u.domain for u in target_universities],
+            "force_refresh": request.force_refresh,
+        },
+        status="QUEUED",
+        progress=Phase1JobProgress(total=total_tasks, processed=0, succeeded=0, failed=0),
+        scorecard=JobScorecard(job_id=job_id, target_universities=total_tasks).to_dict(),
+    )
+    await _persist_job(job)
+
+    if request.run_sync:
+        await _execute_phase1_job(job_id, target_universities, target_disciplines, request.force_refresh)
+    else:
+        asyncio.create_task(_execute_phase1_job(job_id, target_universities, target_disciplines, request.force_refresh))
+
+    return {
+        "job_id": job_id,
+        "status": phase1_jobs_store[job_id].status,
+        "target_universities": len(target_universities),
+        "target_disciplines": target_disciplines,
+        "total_tasks": total_tasks,
+    }
+
+
+@router.get("/jobs/{job_id}", response_model=Phase1JobRecord)
+async def get_discovery_job(job_id: str, user: str = Depends(get_current_user)):
+    """Returns live progress, checkpointed results, and scorecard for a Phase 1 Discovery Job."""
+    if job_id in phase1_jobs_store:
+        return phase1_jobs_store[job_id]
+    if db_manager.is_connected and db_manager.db is not None:
+        doc = await db_manager.get_collection("phase1_jobs").find_one({"job_id": job_id})
+        if doc:
+            doc.pop("_id", None)
+            rec = Phase1JobRecord(**doc)
+            phase1_jobs_store[job_id] = rec
+            return rec
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found.")
+
+
+@router.get("/jobs/{job_id}/scorecard")
+async def get_discovery_job_scorecard(job_id: str, user: str = Depends(get_current_user)):
+    """Returns the Self-Measuring Health & Quality Scorecard for a Phase 1 Discovery Job."""
+    job = await get_discovery_job(job_id, user=user)
+    return job.scorecard
+
+
+@router.get("/review-queue", response_model=List[UniversityDepartmentCache])
+async def get_discovery_review_queue(user: str = Depends(get_current_user)):
+    """Returns all `NEEDS_REVIEW` (and `NOT_FOUND`) university department records with exact typed ErrorCode and discovery_path."""
+    records: List[UniversityDepartmentCache] = []
+    seen = set()
+
+    if db_manager.is_connected and db_manager.db is not None:
+        cursor = db_manager.get_collection("university_departments").find(
+            {"status": {"$in": [TerminalStatus.NEEDS_REVIEW.value, TerminalStatus.NOT_FOUND.value]}}
+        )
+        async for doc in cursor:
+            doc.pop("_id", None)
+            rec = UniversityDepartmentCache(**doc)
+            key = (rec.domain, rec.discipline_key)
+            if key not in seen:
+                seen.add(key)
+                records.append(rec)
+
+    for key, rec in discovery_engine._dept_cache_memory.items():
+        if key not in seen and rec.status in (TerminalStatus.NEEDS_REVIEW.value, TerminalStatus.NOT_FOUND.value):
+            seen.add(key)
+            records.append(rec)
+
+    return records
+
+
+@router.get("/policies")
+def get_discovery_policies(user: str = Depends(get_current_user)):
+    """Returns active Phase 1 admin kill-switches and monthly Search API budget counters."""
+    return policy_manager.to_dict()
+
+
+@router.post("/policies")
+def update_discovery_policies(request: UpdatePolicyRequest, user: str = Depends(get_current_user)):
+    """Updates Phase 1 admin kill-switches (`enable_search_api`, `enable_playwright`) and monthly budget caps."""
+    return policy_manager.update_policies(
+        enable_search_api=request.enable_search_api,
+        enable_playwright=request.enable_playwright,
+        monthly_search_cap=request.monthly_search_cap,
+        reset_search_counter=request.reset_search_counter,
+    )
+
 

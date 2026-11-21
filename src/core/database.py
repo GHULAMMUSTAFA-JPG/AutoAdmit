@@ -109,6 +109,23 @@ class DatabaseManager:
                 IndexModel([("is_seed", ASCENDING)])
             ])
 
+            # 5. Entity-level University Departments Cache collection indexes
+            uni_depts = self.db["university_departments"]
+            await uni_depts.create_indexes([
+                IndexModel([("domain", ASCENDING), ("discipline_key", ASCENDING)], unique=True),
+                IndexModel([("status", ASCENDING)]),
+                IndexModel([("expires_at", ASCENDING)]),
+                IndexModel([("last_error_code", ASCENDING)])
+            ])
+
+            # 6. Phase 1 Async Discovery Jobs collection indexes
+            phase1_jobs = self.db["phase1_jobs"]
+            await phase1_jobs.create_indexes([
+                IndexModel([("job_id", ASCENDING)], unique=True),
+                IndexModel([("status", ASCENDING)]),
+                IndexModel([("started_at", ASCENDING)])
+            ])
+
             logger.info("MongoDB deduplication and operational indexes successfully verified.")
         except Exception as e:
             logger.error(f"Error creating MongoDB indexes: {e}")

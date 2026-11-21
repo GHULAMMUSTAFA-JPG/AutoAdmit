@@ -316,6 +316,19 @@ class FacultyHarvester:
                 return qualification
         return None
 
+    @staticmethod
+    def _has_explicit_supervisor_negation(text: str) -> bool:
+        """Returns True if the profile explicitly states non-supervisor status (e.g. '非博导', '硕导：否')."""
+        for marker, _ in SUPERVISOR_MARKERS:
+            for m in re.finditer(re.escape(marker), text):
+                pre_window = text[max(0, m.start() - 6):m.start()]
+                post_window = text[m.end():m.end() + 8]
+                if re.search(r"(?:[非不无未]|不是|暂无)\s*$", pre_window) or re.match(
+                    r"^[:：\s]*(?:否|无|不是)", post_window
+                ):
+                    return True
+        return False
+
     # ------------------------------------------------------------------ profile parsing
     def parse_profile_html(
         self,
@@ -323,6 +336,7 @@ class FacultyHarvester:
         source_url: str,
         university_name: str,
         department_name: str = "Computer Science",
+        inherited_qualification: Optional[SupervisorQualification] = None,
     ) -> Optional[FacultyProfile]:
         """Parse one faculty profile page. Returns None when it is not a verifiable supervisor."""
         content_hash = normalizer.compute_sha256(html)
@@ -333,6 +347,8 @@ class FacultyHarvester:
         full_text = soup.get_text(separator=" ", strip=True)
 
         qualification = self.verify_qualification(full_text)
+        if not qualification and inherited_qualification and not self._has_explicit_supervisor_negation(full_text):
+            qualification = inherited_qualification
         if not qualification:
             logger.info(f"Skipping {source_url}: no graduate supervisor credential.")
             return None
@@ -417,12 +433,18 @@ class FacultyHarvester:
 
     # ------------------------------------------------------------------ directory crawl
     async def crawl_directory(
-        self, directory_url: str, university_name: str, department_name: str, sem: asyncio.Semaphore
+        self,
+        directory_url: str,
+        university_name: str,
+        department_name: str,
+        sem: asyncio.Semaphore,
+        inherited_qualification: Optional[SupervisorQualification] = None,
     ) -> List[FacultyProfile]:
         """Follow a faculty directory (with pagination), fetch each profile page, return verified supervisors."""
         base_domain = registrable_domain(urlparse(directory_url).netloc)
         links: List[Tuple[str, str]] = []
         seen_pages, page_url = set(), directory_url
+        detected_dir_qual = inherited_qualification
         for _ in range(settings.MAX_DIRECTORY_PAGES):
             if not page_url or page_url in seen_pages:
                 break
@@ -433,6 +455,10 @@ class FacultyHarvester:
                 except Exception as e:
                     logger.warning(f"Directory fetch failed {page_url}: {e}")
                     break
+            if detected_dir_qual is None:
+                soup_dir = BeautifulSoup(html, "html.parser")
+                dir_title = soup_dir.title.get_text(" ", strip=True) if soup_dir.title else ""
+                detected_dir_qual = self.verify_qualification(dir_title)
             links += [l for l in self.extract_profile_links(html, final) if l not in links]
             page_url = self.find_next_page(html, final)
             if len(links) >= settings.MAX_PROFILES_PER_DEPARTMENT:
@@ -446,7 +472,13 @@ class FacultyHarvester:
                     html, final = await self.fetch_page(url)
                     if not self.same_site(final, base_domain):
                         return None
-                    return self.parse_profile_html(html, final, university_name, department_name)
+                    return self.parse_profile_html(
+                        html,
+                        final,
+                        university_name,
+                        department_name,
+                        inherited_qualification=detected_dir_qual,
+                    )
                 except Exception as e:
                     logger.warning(f"Profile fetch failed {url}: {e}")
                     return None

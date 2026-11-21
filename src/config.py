@@ -84,6 +84,21 @@ class Settings(BaseSettings):
     RESPECT_ROBOTS_TXT: bool = Field(default=True)
     ALLOW_LOCAL_TEST_HOSTS: bool = Field(default=False, description="Tests only: whitelist localhost/testserver.")
 
+    # Phase 1 Production Discovery Policies, Search APIs & Budget Caps
+    ENABLE_SEARCH_API: bool = Field(default=True, description="Admin kill-switch for L3 Search-First fallback.")
+    ENABLE_PLAYWRIGHT: bool = Field(default=True, description="Admin kill-switch for L4 Playwright WAF/JS fallback.")
+    SEARCH_PROVIDER: str = Field(default="serper", description="Primary search provider: 'serper', 'tavily', or 'duckduckgo'.")
+    SERPER_API_KEY: str = Field(default="", description="Serper.dev Google Search API key.")
+    TAVILY_API_KEY: str = Field(default="", description="Tavily Search API key.")
+    FIRECRAWL_API_KEY: str = Field(default="", description="Optional Firecrawl API key for markdown/map scraping.")
+    MONTHLY_SEARCH_CAP: int = Field(default=1000, description="Maximum L3 search API calls allowed per month.")
+    SEARCH_COST_PER_CALL_USD: float = Field(default=0.001, description="Estimated USD cost per Search API query.")
+    PHASE1_HTTP_CONCURRENCY: int = Field(default=5, description="Bounded semaphore for fast httpx requests in Phase 1.")
+    PHASE1_PLAYWRIGHT_CONCURRENCY: int = Field(default=1, description="Bounded semaphore for headless Playwright in Phase 1.")
+    PHASE1_DOMAIN_DELAY_SECONDS: float = Field(default=1.0, description="Minimum per-domain delay in seconds (+ random jitter).")
+    PHASE1_CACHE_TTL_DAYS: int = Field(default=90, description="TTL in days for COMPLETE/PARTIAL department cache records.")
+    PHASE1_REVIEW_TTL_DAYS: int = Field(default=7, description="TTL in days for NEEDS_REVIEW department cache records.")
+
     # Public Tracking & Web Gateway
     TRACKING_BASE_URL: str = Field(default="http://localhost:8000")
 

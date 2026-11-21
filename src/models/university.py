@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -36,7 +36,9 @@ class University(BaseModel):
     website: Optional[str] = Field(default=None, description="Official website URL from the live source")
     region: str = Field(default="Unknown", description="Province-level region resolved from live data")
     tier: FeasibilityTier = Field(default=FeasibilityTier.TIER_3_SAFETY)
-    cs_ranking: Optional[int] = Field(default=None, description="Unset: no live ranking source configured")
+    cs_ranking: Optional[int] = Field(default=None, description="Subject-specific ranking from CSRankings / Shanghai Ranking")
+    subject_rankings: Dict[str, int] = Field(default_factory=dict, description="Subject-wise rank table e.g. {'cs': 1, 'ai': 2}")
+    scholarship_urls: Dict[str, str] = Field(default_factory=dict, description="CSC and International Office portal URLs")
     is_project_985: bool = Field(default=False)
     is_project_211: bool = Field(default=False)
     is_double_first_class: bool = Field(default=False)
@@ -64,3 +66,50 @@ class PreRunCostEstimate(BaseModel):
     estimated_runtime_seconds: int
     is_approved: bool = False
     approved_at: Optional[datetime] = None
+
+
+class FacultyRosterEndpoint(BaseModel):
+    """Faculty directory URL with inherited breadcrumb / degree context for Phase 2."""
+    url: str
+    label_zh: str = "师资队伍"
+    inherited_degree: str = "master"
+
+
+class UniversityDepartmentCache(BaseModel):
+    """Entity-level cached department & faculty roster record in `university_departments` collection."""
+    domain: str
+    university_name: str
+    discipline_key: str
+    department_name_zh: Optional[str] = None
+    department_name_en: Optional[str] = None
+    department_url: Optional[str] = None
+    homepage_url: Optional[str] = None
+    faculty_roster_urls: List[FacultyRosterEndpoint] = Field(default_factory=list)
+    status: str = Field(default="NEEDS_REVIEW", description="COMPLETE | PARTIAL | NOT_FOUND | NEEDS_REVIEW")
+    confidence: str = Field(default="LOW", description="HIGH | MEDIUM | LOW")
+    discovery_path: List[str] = Field(default_factory=list, description="Audit trail of layers executed")
+    last_error_code: str = Field(default="NONE")
+    error_detail: str = Field(default="")
+    resolved_by_layer: Optional[str] = None
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Phase1JobProgress(BaseModel):
+    total: int = 0
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+
+
+class Phase1JobRecord(BaseModel):
+    """Async Phase 1 discovery job record stored in `phase1_jobs` collection."""
+    job_id: str
+    query_params: Dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="QUEUED", description="QUEUED | RUNNING | COMPLETED | FAILED")
+    progress: Phase1JobProgress = Field(default_factory=Phase1JobProgress)
+    scorecard: Dict[str, Any] = Field(default_factory=dict)
+    results: List[UniversityDepartmentCache] = Field(default_factory=list)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: Optional[datetime] = None
+
