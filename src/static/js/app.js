@@ -3017,16 +3017,13 @@ window.addEventListener("scroll", () => {
   }
 });
 
-// App Initialization
+// App Initialization (No password gate)
 document.addEventListener("DOMContentLoaded", () => {
+  hideAuthOverlay();
   startLocalCSTClock();
   initTableDragResizers();
-  if (!authHeader) {
-    showAuthOverlay();
-  } else {
-    syncCSTClock();
-    loadAllData();
-    initScrollSpy();
-    initWebSocket();
-  }
+  syncCSTClock();
+  loadAllData();
+  initScrollSpy();
+  initWebSocket();
 });
