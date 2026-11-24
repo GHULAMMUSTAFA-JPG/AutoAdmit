@@ -75,9 +75,13 @@ ensure_cloudflared() {
 # STEP 3: Start Public HTTPS Tunnel (Decoupled — failure NEVER kills Qwen!)
 # ---------------------------------------------------------------------------
 start_localhost_run() {
-  echo "[3/3] Starting fallback HTTPS tunnel via localhost.run (no account / no Cloudflare 429)..."
+  echo "[3/3] Starting auto-reconnecting HTTPS tunnel via localhost.run (no account / no Cloudflare 429)..."
   echo "      Copy the https://*.lhr.life URL printed below into COLAB_BASE_URL in Oracle .env"
-  exec ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R "80:127.0.0.1:${PORT}" nokey@localhost.run
+  while true; do
+    ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R "80:127.0.0.1:${PORT}" nokey@localhost.run -- --output json || true
+    echo "[WARN] localhost.run tunnel disconnected; Qwen stays loaded in VRAM. Reconnecting in 2s..."
+    sleep 2
+  done
 }
 
 start_ngrok() {

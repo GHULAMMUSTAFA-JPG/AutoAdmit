@@ -2,6 +2,7 @@
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING, IndexModel
+from pymongo.errors import AutoReconnect
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -27,7 +28,10 @@ class MongoManager:
                 serverSelectionTimeoutMS=5000,
             )
             self.db = self.client[self.db_name]
-            await ensure_permanent_indexes(self.db)
+            try:
+                await ensure_permanent_indexes(self.db)
+            except AutoReconnect:
+                await ensure_permanent_indexes(self.db)
             logger.info("mongo_connected", db_name=self.db_name)
         assert self.db is not None
         return self.db
@@ -75,6 +79,12 @@ async def ensure_permanent_indexes(db: AsyncIOMotorDatabase) -> None:
 
     await db["university_site_trees"].create_indexes([
         IndexModel([("domain", ASCENDING)], unique=True, name="uniq_site_tree_domain"),
+    ])
+
+    await db["api_call_traces"].create_indexes([
+        IndexModel([("trace_id", ASCENDING)], unique=True, name="uniq_api_trace_id"),
+        IndexModel([("job_id", ASCENDING), ("provider", ASCENDING), ("created_at", ASCENDING)], name="idx_trace_job_provider"),
+        IndexModel([("status", ASCENDING), ("created_at", ASCENDING)], name="idx_trace_status"),
     ])
     logger.info("permanent_indexes_verified")
 

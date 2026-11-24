@@ -7,8 +7,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_admin import router as admin_router
+from app.api.routes_analytics import router as analytics_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_trees import router as trees_router
+from app.core.llm_router import llm_router
 from app.db.mongo import MongoManager, mongo_manager
 from app.db.repositories import Repository
 from app.schemas.filters import AdminConfig
@@ -30,6 +32,7 @@ def create_app(manager: MongoManager | None = None, admin_config: AdminConfig | 
     async def lifespan(application: FastAPI):
         db = await mgr.connect()
         repo = Repository(db)
+        llm_router.set_trace_repo(repo)
         phase1 = Phase1DiscoveryService(repo, admin=cfg)
         scraper = Phase2ScraperService(repo, admin=cfg)
         extractor = Phase2ExtractorService(repo, admin=cfg)
@@ -52,6 +55,7 @@ def create_app(manager: MongoManager | None = None, admin_config: AdminConfig | 
     application.include_router(jobs_router)
     application.include_router(admin_router)
     application.include_router(trees_router)
+    application.include_router(analytics_router)
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

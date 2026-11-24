@@ -2,6 +2,8 @@
 
 import json
 import re
+import time
+import uuid
 from typing import Any
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -10,10 +12,11 @@ from selectolax.lexbor import LexborHTMLParser
 
 from app.core.config import settings
 from app.core.llm_router import LLMRouter, llm_router
-from app.core.logging import get_logger
+from app.core.logging import current_domain, current_job_id, get_logger
 from app.core.types import ErrorCode, StepResult
 from app.db.repositories import Repository
 from app.schemas.entities import (
+    ApiCallTraceDoc,
     SiteTreeNode,
     UniversitySiteTreeDoc,
     VerifiedRosterEntry,
@@ -23,6 +26,8 @@ from app.schemas.filters import AdminConfig
 from app.services.nav_agent import _default_playwright_fetch
 from app.services.phase1_discovery import DEGREE_ZH, decode_bytes_safely
 from app.services.phase2_scraper import (
+    CAROUSEL_SELECTORS,
+    is_root_or_index_url,
     is_same_root_domain,
     registrable_domain,
     verify_roster_html,
@@ -30,7 +35,10 @@ from app.services.phase2_scraper import (
 
 logger = get_logger("services.site_tree_builder")
 
-NAV_SELECTORS = ("header a[href]", "nav a[href]", ".navbar a[href]", ".top-nav a[href]", ".menu a[href]")
+SEMANTIC_NAV_SELECTORS = ("header a[href]", "nav a[href]")
+DIV_NAV_SELECTORS = (".nav a[href]", "#nav a[href]", ".navbar a[href]", ".top-nav a[href]", ".menu a[href]", "#menu a[href]")
+NAV_SELECTORS = (*SEMANTIC_NAV_SELECTORS, *DIV_NAV_SELECTORS)
+NAV_EXCLUDE_SELECTORS = (".breadcrumb", ".crumbs", ".pagination", ".pager")
 SIDEBAR_SELECTORS = ("aside a[href]", ".sidebar a[href]", ".left-menu a[href]", ".sub-nav a[href]", ".left_nav a[href]", ".side-nav a[href]")
 BODY_NOISE_PATTERNS = (
     "/news", "/notice", "/events", "/login", "/intllogin", "/alumni", "/campus",
@@ -40,6 +48,13 @@ BODY_NOISE_PATTERNS = (
 SCHOOLS_DIR_KEYWORDS = ("院系设置", "学院设置", "学部院系", "机构设置", "教学单位", "schools", "colleges", "departments", "faculties")
 FACULTY_BRANCH_KEYWORDS = ("师资", "教师", "导师", "在职教师", "博导", "硕导", "faculty", "people", "staff", "teachers", "supervisors")
 ENGLISH_BROCHURE_PREFIXES = ("ev.", "en.", "english.", "intl.", "iso.")
+BLOCKED_SUBDOMAIN_PREFIXES = (
+    "stuex.", "iczu.", "iso.", "sie.", "admission.", "gs.", "hr.", "lib.", "news.", "alumni.",
+)
+NON_CS_COLLEGE_KEYWORDS = (
+    "医学院", "法学院", "经济", "管理", "外文", "新闻", "历史", "哲学", "艺术", "体育", "农学",
+    "medical", "law", "business", "shmc.",
+)
 
 DEPT_SYNONYMS: dict[str, tuple[str, ...]] = {
     "computer science": ("computer", "计算机", "计算", "cs."),
@@ -56,37 +71,83 @@ def is_english_brochure_host(url: str) -> bool:
     return any(host.startswith(p) for p in ENGLISH_BROCHURE_PREFIXES)
 
 
-def extract_3zone_links(html: str, base_url: str, root_domain: str) -> dict[str, list[dict[str, str]]]:
-    """Extracts same-root-domain links tagged into [NAV], [SIDEBAR], and filtered [BODY] zones."""
+def is_cs_engineering_department(department: str) -> bool:
+    low = (department or "").strip().lower()
+    return any(k in low for k in ("computer", "software", "artificial intelligence", "ai", "cyber", "engineering", "电子", "计算机", "软件", "人工智能"))
+
+
+def is_blocked_academic_link(url: str, label: str = "", department: str = "") -> bool:
+    """Blocks non-academic/exchange subdomains and non-CS colleges when targeting CS/Engineering."""
+    host = urlparse(url or "").netloc.lower()
+    if any(host.startswith(p) for p in BLOCKED_SUBDOMAIN_PREFIXES):
+        return True
+    if is_cs_engineering_department(department):
+        blob = f"{label} {url}".lower()
+        if any(kw in blob for kw in NON_CS_COLLEGE_KEYWORDS):
+            return True
+    return False
+
+
+def extract_3zone_links_with_meta(
+    html: str,
+    base_url: str,
+    root_domain: str,
+    *,
+    department: str = "",
+) -> tuple[dict[str, list[dict[str, str]]], str]:
+    """
+    Extracts same-root-domain links tagged into [NAV], [SIDEBAR], and filtered [BODY] zones,
+    and returns `(zones, nav_type)` where `nav_type` is 'SEMANTIC_NAV', 'DIV_BASED_NAV', or 'UNKNOWN'.
+    Excludes breadcrumbs/pagination from [NAV] and strips carousels from [BODY].
+    """
     tree = LexborHTMLParser(html or "")
+    for excl in NAV_EXCLUDE_SELECTORS:
+        for node in tree.css(excl):
+            node.decompose()
+
     zones: dict[str, list[dict[str, str]]] = {"NAV": [], "SIDEBAR": [], "BODY": []}
     seen: set[str] = set()
 
-    def _add(zone_name: str, a_node: Any, filter_noise: bool = False) -> None:
+    def _add(zone_name: str, a_node: Any, filter_noise: bool = False) -> bool:
         href = (a_node.attributes.get("href") or "").strip()
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
-            return
+            return False
         abs_url = urljoin(base_url, href).split("#")[0]
         if abs_url in seen or abs_url.rstrip("/") == base_url.rstrip("/"):
-            return
+            return False
         if not is_same_root_domain(abs_url, root_domain):
-            return
+            return False
         low = abs_url.lower()
         if low.endswith((".pdf", ".doc", ".docx", ".xls", ".zip", ".rar", ".jpg", ".png", ".mp4")):
-            return
+            return False
         if filter_noise and any(bad in low for bad in BODY_NOISE_PATTERNS):
-            return
+            return False
         text = re.sub(r"\s+", " ", a_node.text(separator=" ", strip=True) or a_node.attributes.get("title") or "").strip()
         if not text:
-            return
+            return False
+        if is_blocked_academic_link(abs_url, text, department):
+            return False
         seen.add(abs_url)
         zones[zone_name].append({"label": text[:80], "url": abs_url, "zone": zone_name})
+        return True
 
-    for sel in NAV_SELECTORS:
+    semantic_nav_count = 0
+    for sel in SEMANTIC_NAV_SELECTORS:
         for node in tree.css(sel):
-            _add("NAV", node, filter_noise=False)
+            if _add("NAV", node, filter_noise=False):
+                semantic_nav_count += 1
             if len(zones["NAV"]) >= 60:
                 break
+
+    div_nav_count = 0
+    for sel in DIV_NAV_SELECTORS:
+        for node in tree.css(sel):
+            if _add("NAV", node, filter_noise=False):
+                div_nav_count += 1
+            if len(zones["NAV"]) >= 60:
+                break
+
+    nav_type = "SEMANTIC_NAV" if semantic_nav_count > 0 else ("DIV_BASED_NAV" if div_nav_count > 0 else "UNKNOWN")
 
     for sel in SIDEBAR_SELECTORS:
         for node in tree.css(sel):
@@ -94,11 +155,28 @@ def extract_3zone_links(html: str, base_url: str, root_domain: str) -> dict[str,
             if len(zones["SIDEBAR"]) >= 50:
                 break
 
+    # Strip promotional carousels/sliders before extracting [BODY] links
+    for csel in CAROUSEL_SELECTORS:
+        for cnode in tree.css(csel):
+            cnode.decompose()
+
     for node in tree.css("a[href]"):
         _add("BODY", node, filter_noise=True)
         if len(zones["BODY"]) >= 80:
             break
 
+    return zones, nav_type
+
+
+def extract_3zone_links(
+    html: str,
+    base_url: str,
+    root_domain: str,
+    *,
+    department: str = "",
+) -> dict[str, list[dict[str, str]]]:
+    """Extracts same-root-domain links tagged into [NAV], [SIDEBAR], and filtered [BODY] zones."""
+    zones, _ = extract_3zone_links_with_meta(html, base_url, root_domain, department=department)
     return zones
 
 
@@ -318,19 +396,76 @@ class SiteTreeBuilder:
         query = f'site:{domain} ("{department}" OR {zh_dept}) (faculty OR people OR 师资队伍 OR 教师名录 OR {deg_zh})'
 
         try:
+            t0 = time.perf_counter()
+            req_body = {"q": query, "num": 10}
             resp = await client.post(
                 "https://google.serper.dev/search",
                 headers={"X-API-KEY": settings.SERPER_API_KEY, "Content-Type": "application/json"},
-                json={"q": query, "num": 10},
+                json=req_body,
                 timeout=12.0,
             )
+            lat_ms = int((time.perf_counter() - t0) * 1000)
             if resp.status_code != 200:
+                st_label = "auth_error_401_403" if resp.status_code in (401, 403) else ("rate_limited_429" if resp.status_code == 429 else f"http_error_{resp.status_code}")
+                await self.repo.insert_api_call_trace(
+                    ApiCallTraceDoc(
+                        trace_id=f"tr_{uuid.uuid4().hex[:12]}",
+                        job_id=current_job_id.get() or "",
+                        domain=current_domain.get() or domain,
+                        stage="serper_fallback",
+                        provider="serper",
+                        model="google.serper.dev/search",
+                        tier=0,
+                        status=st_label,
+                        http_status=resp.status_code,
+                        error_detail=f"Serper returned HTTP {resp.status_code}: {resp.text[:240]}",
+                        latency_ms=lat_ms,
+                        request_payload=json.dumps(req_body, ensure_ascii=False),
+                        response_payload=resp.text[:8000],
+                    )
+                )
                 return StepResult.fail(ErrorCode.HTTP_ERROR, f"Serper returned HTTP {resp.status_code}")
+            await self.repo.insert_api_call_trace(
+                ApiCallTraceDoc(
+                    trace_id=f"tr_{uuid.uuid4().hex[:12]}",
+                    job_id=current_job_id.get() or "",
+                    domain=current_domain.get() or domain,
+                    stage="serper_fallback",
+                    provider="serper",
+                    model="google.serper.dev/search",
+                    tier=0,
+                    status="ok",
+                    http_status=200,
+                    error_detail="",
+                    latency_ms=lat_ms,
+                    request_payload=json.dumps(req_body, ensure_ascii=False),
+                    response_payload=resp.text[:8000],
+                )
+            )
             organic = [
                 item for item in (resp.json().get("organic") or [])[:10]
-                if item.get("link") and is_same_root_domain(item["link"], domain)
+                if item.get("link")
+                and is_same_root_domain(item["link"], domain)
+                and not is_blocked_academic_link(item["link"], item.get("title", ""), department)
             ]
         except Exception as exc:
+            await self.repo.insert_api_call_trace(
+                ApiCallTraceDoc(
+                    trace_id=f"tr_{uuid.uuid4().hex[:12]}",
+                    job_id=current_job_id.get() or "",
+                    domain=current_domain.get() or domain,
+                    stage="serper_fallback",
+                    provider="serper",
+                    model="google.serper.dev/search",
+                    tier=0,
+                    status="timeout" if isinstance(exc, httpx.TimeoutException) else "connection_error",
+                    http_status=None,
+                    error_detail=f"Serper request failed: {exc}",
+                    latency_ms=0,
+                    request_payload=json.dumps({"q": query, "num": 10}, ensure_ascii=False),
+                    response_payload="",
+                )
+            )
             return StepResult.fail(ErrorCode.HTTP_TIMEOUT, f"Serper request failed: {exc}")
 
         if not organic:
@@ -466,9 +601,46 @@ class SiteTreeBuilder:
                     _record_node(cur_url, cur_label, cur_zone, depth, "DEAD_END", parent_url)
                     return None
 
-                # Check Deterministic Roster Verification Gate (>= 3 plausible same-domain profile links)
-                ok_gate, profiles = verify_roster_html(html, final_u, root_domain=clean_dom, min_profiles=3)
-                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, passed=ok_gate, profiles=len(profiles))
+                zones, page_nav_type = extract_3zone_links_with_meta(html, final_u, clean_dom, department=department)
+                if tree.nav_type == "UNKNOWN" and page_nav_type != "UNKNOWN":
+                    tree.nav_type = page_nav_type  # type: ignore[assignment]
+                logger.info(
+                    "tree_zones_extracted",
+                    domain=clean_dom,
+                    depth=depth,
+                    url=final_u,
+                    nav_type=page_nav_type,
+                    nav=len(zones["NAV"]),
+                    sidebar=len(zones["SIDEBAR"]),
+                    body=len(zones["BODY"]),
+                )
+
+                # Classify page structure BEFORE running Deterministic Roster Gate
+                low_page = f"{cur_label} {final_u} {html[:3000]}".lower()
+                is_schools_dir = any(k in low_page for k in SCHOOLS_DIR_KEYWORDS) and len(zones["BODY"]) >= 4
+                is_root_idx = is_root_or_index_url(final_u)
+                is_dept_entry = (
+                    not is_schools_dir
+                    and (
+                        is_root_idx
+                        or (
+                            dept_url_seen is None
+                            and any(s in low_page for s in DEPT_SYNONYMS.get(department.lower(), (department.lower(),)))
+                            and not any(fk in f"{cur_label} {final_u}".lower() for fk in FACULTY_BRANCH_KEYWORDS)
+                        )
+                    )
+                )
+                inferred_node_type = "SCHOOLS_DIR" if is_schools_dir else ("DEPT_HOME" if is_dept_entry else "FACULTY_SECTION")
+
+                # NEVER allow HOME, SCHOOLS_DIR, DEPT_HOME, or root/index URLs to pass verify_roster_html
+                ok_gate, profiles = verify_roster_html(
+                    html,
+                    final_u,
+                    root_domain=clean_dom,
+                    min_profiles=3,
+                    node_type=inferred_node_type,
+                )
+                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, node_type=inferred_node_type, passed=ok_gate, profiles=len(profiles))
                 if ok_gate:
                     _record_node(final_u, cur_label, cur_zone, depth, "VERIFIED_ROSTER", parent_url)
                     return {
@@ -479,20 +651,7 @@ class SiteTreeBuilder:
                         "hops": hops_taken,
                     }
 
-                zones = extract_3zone_links(html, final_u, clean_dom)
-                logger.info(
-                    "tree_zones_extracted",
-                    domain=clean_dom,
-                    depth=depth,
-                    url=final_u,
-                    nav=len(zones["NAV"]),
-                    sidebar=len(zones["SIDEBAR"]),
-                    body=len(zones["BODY"]),
-                )
-
                 # Detect Schools/Colleges directory (院系设置) and harvest ALL departments into departments_map
-                low_page = f"{cur_label} {final_u} {html[:3000]}".lower()
-                is_schools_dir = any(k in low_page for k in SCHOOLS_DIR_KEYWORDS) and len(zones["BODY"]) >= 4
                 if is_schools_dir:
                     _record_node(final_u, cur_label, cur_zone, depth, "SCHOOLS_DIR", parent_url)
                     for b_link in zones["BODY"]:
@@ -505,10 +664,8 @@ class SiteTreeBuilder:
                         if hit:
                             return hit
                 else:
-                    is_dept = any(s in low_page for s in DEPT_SYNONYMS.get(department.lower(), (department.lower(),)))
-                    node_t = "DEPT_HOME" if is_dept else "FACULTY_SECTION"
-                    _record_node(final_u, cur_label, cur_zone, depth, node_t, parent_url)
-                    if is_dept and not dept_url_seen:
+                    _record_node(final_u, cur_label, cur_zone, depth, inferred_node_type, parent_url)
+                    if inferred_node_type == "DEPT_HOME" and not dept_url_seen:
                         dept_url_seen = final_u
 
                 if depth >= self.max_depth:
@@ -539,10 +696,12 @@ class SiteTreeBuilder:
                 st0, final0, html0 = await self._fetch_page(client, root_url)
                 if st0 == 200 and html0:
                     _record_node(final0, clean_dom, "NAV", 0, "HOME", None)
-                    zones0 = extract_3zone_links(html0, final0, clean_dom)
+                    zones0, home_nav_type = extract_3zone_links_with_meta(html0, final0, clean_dom, department=department)
+                    tree.nav_type = home_nav_type  # type: ignore[assignment]
                     logger.info(
                         "tree_hop0_bfs",
                         domain=clean_dom,
+                        nav_type=home_nav_type,
                         nav=len(zones0["NAV"]),
                         sidebar=len(zones0["SIDEBAR"]),
                         body=len(zones0["BODY"]),

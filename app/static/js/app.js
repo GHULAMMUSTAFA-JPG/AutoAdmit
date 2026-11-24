@@ -1,12 +1,14 @@
-/* AutoAdmit P12 Frontend Controller — Wired to app/main.py */
+/* AutoAdmit P12 Tabbed SaaS Workspace Controller */
 
 const state = {
   universities: [],
+  activeTab: "tab-trees",
   activeJobId: null,
   pollTimer: null,
   logOffset: 0,
   logTotal: 0,
-  logEntries: []
+  logEntries: [],
+  drawerOpen: false
 };
 
 function esc(v) {
@@ -24,8 +26,71 @@ function showToast(msg) {
   el._t = setTimeout(() => el.classList.add("hidden"), 3500);
 }
 
+function switchTab(tabId, btnEl) {
+  state.activeTab = tabId;
+  document.querySelectorAll(".saas-tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".saas-tab-pane").forEach(p => p.classList.remove("active"));
+  if (btnEl) btnEl.classList.add("active");
+  else {
+    const match = document.querySelector(`.saas-tab-btn[data-tab="${tabId}"]`);
+    if (match) match.classList.add("active");
+  }
+  const pane = document.getElementById(tabId);
+  if (pane) pane.classList.add("active");
+  if (tabId === "tab-analytics") loadAnalytics();
+  if (tabId === "tab-professors") loadProfessors();
+  if (tabId === "tab-review") loadNeedsReview();
+}
+
+function openAdminLogsDrawer(forceOpen = false) {
+  const el = document.getElementById("admin-logs-drawer");
+  const chev = document.getElementById("drawer-chevron");
+  if (!el) return;
+  state.drawerOpen = forceOpen ? true : !state.drawerOpen;
+  el.classList.toggle("hidden", !state.drawerOpen);
+  if (chev) chev.innerHTML = state.drawerOpen ? "&#9650; Collapse" : "&#9660; Expand";
+  if (state.drawerOpen) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function toggleAdminLogsDrawer() {
+  openAdminLogsDrawer(false);
+}
+
+function syncTogglePill(cb) {
+  const row = cb.closest(".toggle-pill-row");
+  if (!row) return;
+  const badge = row.querySelector(".toggle-check-badge");
+  row.classList.toggle("enabled", cb.checked);
+  if (badge) badge.innerHTML = cb.checked ? "&#10003; Active" : "Off";
+}
+
+function copyText(text) {
+  if (!text) return;
+  navigator.clipboard?.writeText(text).then(() => showToast(`Copied: ${text}`)).catch(() => showToast(text));
+}
+
 // =========================================================================
-// System Summary & Universities Overview
+// Data Export Helpers (Universities & Per-University Professors)
+// =========================================================================
+function downloadUniversities(fmt = "csv") {
+  window.location.href = `/api/v1/export/universities?format=${encodeURIComponent(fmt)}`;
+  showToast(`Downloading universities (${fmt.toUpperCase()})...`);
+}
+
+function downloadProfessors(domain = "", fmt = "csv") {
+  const params = new URLSearchParams({ format: fmt });
+  if (domain) params.set("domain", domain);
+  window.location.href = `/api/v1/export/professors?${params.toString()}`;
+  showToast(`Downloading professors${domain ? ` for ${domain}` : " (all)"} (${fmt.toUpperCase()})...`);
+}
+
+function downloadFilteredProfessors(fmt = "csv") {
+  const dom = document.getElementById("prof-domain-filter")?.value || "";
+  downloadProfessors(dom, fmt);
+}
+
+// =========================================================================
+// System Summary & Universities Overview (Tab 1)
 // =========================================================================
 async function loadSystemSummary() {
   try {
@@ -33,14 +98,30 @@ async function loadSystemSummary() {
     if (!res.ok) return;
     const d = await res.json();
     document.getElementById("kpi-universities").textContent = d.universities ?? 0;
-    document.getElementById("kpi-depts").textContent = d.university_departments ?? 0;
+    document.getElementById("kpi-depts").textContent = d.site_trees ?? d.university_departments ?? 0;
     document.getElementById("kpi-snapshots").textContent = d.page_snapshots ?? 0;
     document.getElementById("kpi-professors").textContent = d.professors ?? 0;
     document.getElementById("kpi-review").textContent = d.needs_review ?? 0;
+    document.getElementById("tab-count-profs").textContent = d.professors ?? 0;
+    document.getElementById("tab-count-review").textContent = d.needs_review ?? 0;
+    document.getElementById("tab-count-analytics").textContent = d.api_call_traces ?? 0;
     document.getElementById("hdr-summary-text").textContent =
       `${d.universities ?? 0} Unis · ${d.professors ?? 0} Profs · ${d.needs_review ?? 0} Review`;
   } catch (e) {
     console.error("Summary load error:", e);
+  }
+}
+
+function populateDomainSelects(universities) {
+  const domains = universities.map(u => u.domain).filter(Boolean);
+  for (const id of ["prof-domain-filter", "review-domain-filter"]) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    const current = sel.value;
+    const firstLabel = id === "prof-domain-filter" ? "All Universities" : "All Domains";
+    sel.innerHTML = `<option value="">${firstLabel}</option>` +
+      domains.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+    if (domains.includes(current)) sel.value = current;
   }
 }
 
@@ -49,6 +130,7 @@ async function loadUniversitiesOverview() {
     const res = await fetch("/api/v1/universities");
     if (!res.ok) return;
     state.universities = await res.json();
+    populateDomainSelects(state.universities);
     renderUniversitiesTable();
   } catch (e) {
     console.error("Universities load error:", e);
@@ -62,55 +144,87 @@ function renderUniversitiesTable() {
     return `${u.name || ""} ${u.chinese_name || ""} ${u.domain || ""} ${u.region || ""}`.toLowerCase().includes(q);
   });
 
-  document.getElementById("uni-row-count").textContent = rows.length;
+  document.getElementById("tab-count-trees").textContent = rows.length;
   const tbody = document.getElementById("uni-table-body");
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No universities match filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">No universities match filter.</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(u => {
     const st = u.status || "PENDING";
     const stCls = st === "COMPLETE" ? "p12-badge-ok" : st === "RUNNING" ? "p12-badge-info" : st === "NEEDS_REVIEW" ? "p12-badge-warn" : "p12-badge-muted";
+    const navType = u.nav_type || "UNKNOWN";
+    const navCls = navType === "SEMANTIC_NAV" ? "p12-badge-info" : navType === "DIV_BASED_NAV" ? "p12-badge-purple" : "p12-badge-muted";
     const rosterHtml = u.faculty_roster_url
-      ? `<a href="${esc(u.faculty_roster_url)}" target="_blank" rel="noopener" style="color:var(--primary); word-break:break-all;">${esc(u.faculty_roster_url)}</a>`
+      ? `<a href="${esc(u.faculty_roster_url)}" target="_blank" rel="noopener" style="color:var(--primary); word-break:break-all; font-size:11.5px;">${esc(u.faculty_roster_url)}</a>`
       : `<span style="color:var(--text-muted);">—</span>`;
-    const errHtml = u.error_code ? `<div style="margin-top:4px;"><span class="p12-badge p12-badge-err">${esc(u.error_code)}</span></div>` : "";
+    const errHtml = u.error_code ? `<div style="margin-top:3px;"><span class="p12-badge p12-badge-err">${esc(u.error_code)}</span></div>` : "";
+    const profCount = u.professors_verified ?? 0;
     return `
       <tr>
         <td><strong>#${esc(u.rank ?? "-")}</strong></td>
         <td>
           <strong>${esc(u.name || u.domain)}</strong> ${u.chinese_name ? `<span style="color:var(--text-secondary);">(${esc(u.chinese_name)})</span>` : ""}
-          <div style="font-size:11.5px; color:var(--text-muted);">${esc(u.region || "China")} &middot; <code>${esc(u.domain)}</code></div>
+          <div style="font-size:11px; color:var(--text-muted);">${esc(u.region || "China")} &middot; <code>${esc(u.domain)}</code></div>
         </td>
-        <td><span class="p12-badge p12-badge-info">${esc(u.winning_strategy || "PENDING")}</span></td>
-        <td>${rosterHtml}</td>
-        <td><strong>${esc(u.professors_found ?? 0)}</strong> found / <strong style="color:var(--accent-green);">${esc(u.professors_verified ?? 0)}</strong> verified</td>
+        <td><span class="p12-badge ${navCls}">${esc(navType)}</span></td>
         <td>
           <span class="p12-badge ${stCls}">${esc(st)}</span>
           ${errHtml}
         </td>
+        <td style="max-width:260px;">${rosterHtml}</td>
+        <td><strong>${esc(u.departments_mapped_count ?? 0)}</strong></td>
+        <td><strong style="color:${profCount > 0 ? "var(--accent-green)" : "var(--text-muted)"};">${esc(profCount)}</strong></td>
         <td>
-          <button class="btn btn-secondary btn-sm" onclick="viewSiteTree('${esc(u.domain)}')">🌳 View Tree</button>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="viewSiteTree('${esc(u.domain)}')">&#127795; View Tree</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(u.domain)}', 'csv')" title="Download ${esc(u.domain)} professors CSV">&#8681; CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(u.domain)}', 'json')" title="Download ${esc(u.domain)} professors JSON">JSON</button>
+          </div>
         </td>
       </tr>
     `;
   }).join("");
 }
 
-async function buildTreesOnly(btn) {
+function readFilters() {
   const country = (document.getElementById("f-country")?.value || "China").trim();
   const regionsRaw = (document.getElementById("f-regions")?.value || "").trim();
   const regions = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
   const deptsRaw = (document.getElementById("f-departments")?.value || "Computer Science").trim();
-  const department = deptsRaw.split(",")[0].trim() || "Computer Science";
+  const departments = deptsRaw.split(",").map(s => s.trim()).filter(Boolean);
+  const department = departments[0] || "Computer Science";
   const degree = document.getElementById("f-degree")?.value || "masters";
   const tier = document.getElementById("f-tier")?.value || "top_10";
+  return { country, regions, departments, department, degree, tier };
+}
 
+function _attachJobStart(body, msg) {
+  if (body.university_details && Object.keys(body.university_details).length) {
+    state.universities = Object.values(body.university_details).sort((a, b) => (a.rank || 999) - (b.rank || 999));
+    renderUniversitiesTable();
+  }
+  state.activeJobId = body.job_id;
+  document.getElementById("log-job-id").value = body.job_id;
+  document.getElementById("analytics-job-id").value = body.job_id;
+  document.getElementById("log-file-label").textContent = `logs/jobs/${body.job_id}.jsonl`;
+  state.logOffset = 0;
+  state.logEntries = [];
+  document.getElementById("log-viewer-box").innerHTML = "";
+  document.getElementById("active-job-banner").classList.remove("hidden");
+  document.getElementById("job-status-msg").textContent = msg;
+  showToast(msg);
+  startJobPolling(body.job_id);
+}
+
+// Step 1: Build & Verify Trees
+async function buildTreesOnly(btn) {
+  const { country, regions, department, degree, tier } = readFilters();
   const statusMsg = document.getElementById("job-status-msg");
   btn.disabled = true;
-  if (statusMsg) statusMsg.textContent = "Starting Tree-Only build & verification job...";
+  if (statusMsg) statusMsg.textContent = "Starting Step 1: Build & Verify Trees...";
   try {
     const res = await fetch("/api/v1/trees/build", {
       method: "POST",
@@ -120,22 +234,10 @@ async function buildTreesOnly(btn) {
     const body = await res.json();
     if (!res.ok) {
       if (statusMsg) statusMsg.textContent = `Error: ${body.detail || JSON.stringify(body)}`;
+      showToast(`Error: ${body.detail || "Failed"}`);
       return;
     }
-    if (body.university_details && Object.keys(body.university_details).length) {
-      state.universities = Object.values(body.university_details).sort((a, b) => (a.rank || 999) - (b.rank || 999));
-      renderUniversitiesTable();
-    }
-    state.activeJobId = body.job_id;
-    document.getElementById("log-job-id").value = body.job_id;
-    document.getElementById("log-file-label").textContent = `logs/jobs/${body.job_id}.jsonl`;
-    state.logOffset = 0;
-    state.logEntries = [];
-    document.getElementById("log-viewer-box").innerHTML = "";
-    document.getElementById("active-job-banner").classList.remove("hidden");
-    if (statusMsg) statusMsg.textContent = `Tree-only job ${body.job_id} queued (${body.target_domains.length} universities).`;
-    showToast(`Started tree-only job ${body.job_id}`);
-    startJobPolling(body.job_id);
+    _attachJobStart(body, `Step 1 Tree job ${body.job_id} queued (${body.target_domains.length} universities).`);
   } catch (e) {
     if (statusMsg) statusMsg.textContent = `Error: ${e.message}`;
   } finally {
@@ -143,50 +245,38 @@ async function buildTreesOnly(btn) {
   }
 }
 
-async function viewSiteTree(domain) {
-  const panel = document.getElementById("site-tree-panel");
-  const title = document.getElementById("site-tree-title");
-  const mdEl = document.getElementById("site-tree-md");
-  const deptEl = document.getElementById("site-tree-depts");
-  if (!panel) return;
-  panel.classList.remove("hidden");
-  title.textContent = `Site Tree — ${domain}`;
-  mdEl.textContent = "Loading...";
-  deptEl.textContent = "Loading...";
+// Step 2: Extract Professors from Verified Trees
+async function extractFromVerifiedTrees(btn) {
+  const { country, regions, department, degree, tier } = readFilters();
+  const statusMsg = document.getElementById("job-status-msg");
+  btn.disabled = true;
+  if (statusMsg) statusMsg.textContent = "Starting Step 2: Extract Professors from Verified Trees...";
   try {
-    const res = await fetch(`/api/v1/trees/${encodeURIComponent(domain)}`);
+    const res = await fetch("/api/v1/trees/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ country, regions, department, degree, tier })
+    });
+    const body = await res.json();
     if (!res.ok) {
-      mdEl.textContent = `No saved site tree yet for ${domain}. Click "Build & Verify Trees Only" first.`;
-      deptEl.textContent = "{}";
+      if (statusMsg) statusMsg.textContent = `Error: ${body.detail || JSON.stringify(body)}`;
+      showToast(body.detail || "No verified trees found. Run Step 1 first.");
       return;
     }
-    const d = await res.json();
-    mdEl.textContent = d.markdown_tree || "(empty tree)";
-    deptEl.textContent = JSON.stringify({
-      verified_rosters: d.verified_rosters || {},
-      departments_map: d.departments_map || {}
-    }, null, 2);
+    _attachJobStart(body, `Step 2 Extraction job ${body.job_id} queued (${body.target_domains.length} verified universities).`);
   } catch (e) {
-    mdEl.textContent = `Error: ${e.message}`;
+    if (statusMsg) statusMsg.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
   }
 }
 
-// =========================================================================
-// Section 01: Start Discovery Job & Live Polling
-// =========================================================================
+// Full Pipeline (Step 1 + Step 2)
 async function startDiscoveryJob(btn) {
-  const country = (document.getElementById("f-country")?.value || "China").trim();
-  const regionsRaw = (document.getElementById("f-regions")?.value || "").trim();
-  const regions = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
-  const deptsRaw = (document.getElementById("f-departments")?.value || "Computer Science").trim();
-  const departments = deptsRaw.split(",").map(s => s.trim()).filter(Boolean);
-  const degree = document.getElementById("f-degree")?.value || "masters";
-  const tier = document.getElementById("f-tier")?.value || "top_10";
-
+  const { country, regions, departments, degree, tier } = readFilters();
   const statusMsg = document.getElementById("job-status-msg");
   btn.disabled = true;
-  if (statusMsg) statusMsg.textContent = "Starting discovery job...";
-
+  if (statusMsg) statusMsg.textContent = "Starting full pipeline job...";
   try {
     const res = await fetch("/api/v1/jobs/start", {
       method: "POST",
@@ -200,30 +290,17 @@ async function startDiscoveryJob(btn) {
       showToast(`Validation error: ${detail}`);
       return;
     }
-
-    if (body.university_details && Object.keys(body.university_details).length) {
-      state.universities = Object.values(body.university_details).sort((a, b) => (a.rank || 999) - (b.rank || 999));
-      renderUniversitiesTable();
-    }
-
     if (body.source === "database") {
+      if (body.university_details && Object.keys(body.university_details).length) {
+        state.universities = Object.values(body.university_details).sort((a, b) => (a.rank || 999) - (b.rank || 999));
+        renderUniversitiesTable();
+      }
       if (statusMsg) statusMsg.textContent = `Instant DB hit ($0): ${body.count} professors returned from MongoDB.`;
       showToast(`Served ${body.count} professors directly from MongoDB ($0)`);
-      await loadProfessors();
-      await loadSystemSummary();
+      await Promise.all([loadProfessors(), loadSystemSummary()]);
       return;
     }
-
-    state.activeJobId = body.job_id;
-    document.getElementById("log-job-id").value = body.job_id;
-    document.getElementById("log-file-label").textContent = `logs/jobs/${body.job_id}.jsonl`;
-    state.logOffset = 0;
-    state.logEntries = [];
-    document.getElementById("log-viewer-box").innerHTML = "";
-    document.getElementById("active-job-banner").classList.remove("hidden");
-    if (statusMsg) statusMsg.textContent = `Job ${body.job_id} queued (${body.target_domains.length} universities).`;
-    showToast(`Started job ${body.job_id}`);
-    startJobPolling(body.job_id);
+    _attachJobStart(body, `Full pipeline job ${body.job_id} queued (${body.target_domains.length} universities).`);
   } catch (e) {
     if (statusMsg) statusMsg.textContent = `Error: ${e.message}`;
   } finally {
@@ -251,7 +328,7 @@ function startJobPolling(jobId) {
       document.getElementById("banner-job-title").textContent =
         `Job ${job.job_id} — ${job.status} (${completed}/${total} universities completed)`;
       document.getElementById("banner-job-scorecard").textContent =
-        `Verified Profs: ${sc.total_verified_professors ?? 0} · Grounding Pass: ${sc.grounding_pass_pct ?? 100}% · Failures: ${sc.failures ?? 0} · Strategies: ${JSON.stringify(sc.winning_strategies || {})}`;
+        `Verified Profs: ${sc.total_verified_professors ?? 0} · Rosters Verified: ${sc.rosters_verified ?? "-"} · Grounding: ${sc.grounding_pass_pct ?? 100}% · Failures: ${sc.failures ?? 0}`;
 
       if (job.university_details && Object.keys(job.university_details).length) {
         state.universities = Object.values(job.university_details).sort((a, b) => (a.rank || 999) - (b.rank || 999));
@@ -263,7 +340,7 @@ function startJobPolling(jobId) {
       if (job.status === "COMPLETED" || job.status === "FAILED") {
         clearInterval(state.pollTimer);
         state.pollTimer = null;
-        await Promise.all([loadSystemSummary(), loadProfessors(), loadNeedsReview()]);
+        await Promise.all([loadSystemSummary(), loadUniversitiesOverview(), loadProfessors(), loadNeedsReview(), loadAnalytics()]);
         showToast(`Job ${job.job_id} ${job.status}`);
       }
     } catch (e) {
@@ -275,45 +352,110 @@ function startJobPolling(jobId) {
 }
 
 // =========================================================================
-// Section 03 & 04: Professors & Needs Review
+// Tree Modal Drawer
 // =========================================================================
+async function viewSiteTree(domain) {
+  const modal = document.getElementById("tree-modal-backdrop");
+  const title = document.getElementById("site-tree-title");
+  const badge = document.getElementById("site-tree-nav-badge");
+  const mdEl = document.getElementById("site-tree-md");
+  const deptEl = document.getElementById("site-tree-depts");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  title.textContent = `Site Tree — ${domain}`;
+  badge.textContent = "...";
+  mdEl.textContent = "Loading...";
+  deptEl.textContent = "Loading...";
+  try {
+    const res = await fetch(`/api/v1/trees/${encodeURIComponent(domain)}`);
+    if (!res.ok) {
+      badge.textContent = "NOT BUILT";
+      mdEl.textContent = `No saved site tree yet for ${domain}. Click "1. Build & Verify Trees" first.`;
+      deptEl.textContent = "{}";
+      return;
+    }
+    const d = await res.json();
+    badge.textContent = d.nav_type || "UNKNOWN";
+    badge.className = `p12-badge ${d.nav_type === "SEMANTIC_NAV" ? "p12-badge-info" : d.nav_type === "DIV_BASED_NAV" ? "p12-badge-purple" : "p12-badge-muted"}`;
+    mdEl.textContent = d.markdown_tree || "(empty tree)";
+    deptEl.textContent = JSON.stringify({
+      verified_rosters: d.verified_rosters || {},
+      departments_map: d.departments_map || {}
+    }, null, 2);
+  } catch (e) {
+    mdEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+function closeTreeModal() {
+  document.getElementById("tree-modal-backdrop")?.classList.add("hidden");
+}
+
+// =========================================================================
+// Tab 2: Bilingual Verified Professors Table
+// =========================================================================
+function _initials(nameEn, nameZh) {
+  const src = (nameEn || nameZh || "?").trim();
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
+
 async function loadProfessors() {
   const search = (document.getElementById("prof-search")?.value || "").trim();
+  const domain = document.getElementById("prof-domain-filter")?.value || "";
   const emailSt = document.getElementById("prof-email-filter")?.value || "";
   const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (domain) params.set("domain", domain);
   if (emailSt) params.set("email_status", emailSt);
 
   try {
     const res = await fetch(`/api/v1/professors?${params.toString()}`);
     if (!res.ok) return;
     const profs = await res.json();
-    document.getElementById("prof-row-count").textContent = profs.length;
+    document.getElementById("tab-count-profs").textContent = profs.length;
     const tbody = document.getElementById("prof-table-body");
     if (!profs.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No verified professors match filters.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No verified professors match filters.</td></tr>`;
       return;
     }
     tbody.innerHTML = profs.map(p => {
+      const nameEn = p.name_en || p.name || "";
+      const nameZh = p.name && p.name !== nameEn ? p.name : "";
+      const titleEn = p.title_en || p.title || "—";
+      const inits = esc(_initials(nameEn, p.name));
+      const avatarHtml = p.photo_url
+        ? `<img class="prof-avatar" src="${esc(p.photo_url)}" alt="${inits}" onerror="this.outerHTML='<span class=\\'prof-avatar-fallback\\'>${inits}</span>'" />`
+        : `<span class="prof-avatar-fallback">${inits}</span>`;
       const emailCls = p.email_status === "FOUND" ? "p12-badge-ok" : "p12-badge-warn";
       const degs = (p.degree_eligibility || []).map(d => `<span class="p12-badge p12-badge-info">${esc(d)}</span>`).join(" ");
-      const topics = (p.research_interests || []).slice(0, 5).map(t => `<span class="p12-badge p12-badge-muted" style="margin:1px;">${esc(t)}</span>`).join(" ");
+      const areas = (p.research_areas_en && p.research_areas_en.length ? p.research_areas_en : (p.research_interests || [])).slice(0, 4);
+      const topics = areas.map(t => `<span class="p12-badge p12-badge-muted" style="margin:1px;">${esc(t)}</span>`).join(" ");
+      const copyBtn = p.email ? `<button class="copy-btn" onclick="copyText('${esc(p.email)}')" title="Copy email">&#128203;</button>` : "";
       return `
         <tr>
           <td>
-            <strong>${esc(p.name)}</strong>
-            <div style="font-size:11.5px; color:var(--text-muted);">${esc(p.title || "")}</div>
-            <a href="${esc(p.canonical_profile_url)}" target="_blank" rel="noopener" style="font-size:11px; color:var(--primary);">Profile &nearr;</a>
+            <div class="prof-cell">
+              ${avatarHtml}
+              <div>
+                <div style="font-weight:700; color:var(--text-primary);">${esc(nameEn)}</div>
+                ${nameZh ? `<div style="font-size:11.5px; color:var(--text-secondary);">${esc(nameZh)}</div>` : ""}
+                <a href="${esc(p.canonical_profile_url)}" target="_blank" rel="noopener" style="font-size:11px; color:var(--primary);">Profile &nearr;</a>
+              </div>
+            </div>
           </td>
-          <td><code>${esc(p.university_domain)}</code><div style="font-size:11.5px; color:var(--text-secondary);">${esc(p.department)}</div></td>
-          <td>${degs || "—"}</td>
-          <td>${topics || "—"}</td>
+          <td><div class="line-clamp-2" title="${esc(titleEn)}">${esc(titleEn)}</div></td>
           <td>
-            <div><code>${esc(p.email || "—")}</code></div>
-            <span class="p12-badge ${emailCls}" style="margin-top:3px;">${esc(p.email_status)}</span>
-            ${p.status === "POSSIBLY_INACTIVE" ? `<span class="p12-badge p12-badge-err">POSSIBLY_INACTIVE</span>` : ""}
+            <code>${esc(p.university_domain)}</code>
+            <div style="font-size:11px; color:var(--text-secondary);">${esc(p.department)}</div>
           </td>
-          <td style="font-size:12px; color:var(--text-secondary); max-width:260px;">${esc(p.supervisor_evidence_quote || p.name_evidence_quote || "—")}</td>
+          <td>${degs || "—"}</td>
+          <td style="max-width:220px;">${topics || "—"}</td>
+          <td>
+            <div style="display:flex; align-items:center;"><code>${esc(p.email || "—")}</code>${copyBtn}</div>
+            <span class="p12-badge ${emailCls}" style="margin-top:3px;">${esc(p.email_status)}</span>
+          </td>
         </tr>
       `;
     }).join("");
@@ -322,15 +464,23 @@ async function loadProfessors() {
   }
 }
 
+// =========================================================================
+// Tab 3: Needs Review
+// =========================================================================
 async function loadNeedsReview() {
+  const domain = document.getElementById("review-domain-filter")?.value || "";
+  const errorCode = document.getElementById("review-error-filter")?.value || "";
+  const params = new URLSearchParams();
+  if (domain) params.set("domain", domain);
+  if (errorCode) params.set("error_code", errorCode);
   try {
-    const res = await fetch("/api/v1/needs-review");
+    const res = await fetch(`/api/v1/needs-review?${params.toString()}`);
     if (!res.ok) return;
     const items = await res.json();
-    document.getElementById("review-row-count").textContent = items.length;
+    document.getElementById("tab-count-review").textContent = items.length;
     const tbody = document.getElementById("review-table-body");
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:18px;">No items in needs_review.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>`;
       return;
     }
     tbody.innerHTML = items.map(it => `
@@ -338,8 +488,8 @@ async function loadNeedsReview() {
         <td><code>${esc(it.domain)}</code></td>
         <td><span class="p12-badge p12-badge-muted">${esc(it.stage)}</span></td>
         <td><span class="p12-badge p12-badge-err">${esc(it.error_code)}</span></td>
-        <td style="font-size:12px;">${esc(it.detail)}</td>
-        <td>${it.url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" style="color:var(--primary); font-size:12px;">${esc(it.url)}</a>` : "—"}</td>
+        <td style="font-size:12px; max-width:340px;">${esc(it.detail)}</td>
+        <td style="max-width:240px; word-break:break-all;">${it.url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" style="color:var(--primary); font-size:11.5px;">${esc(it.url)}</a>` : "—"}</td>
       </tr>
     `).join("");
   } catch (e) {
@@ -348,7 +498,141 @@ async function loadNeedsReview() {
 }
 
 // =========================================================================
-// Section 05: Complete Un-Truncated Incremental Run Logs Viewer
+// Tab 4: LLM & API Analytics + Trace Modal
+// =========================================================================
+const PROVIDER_LABELS = {
+  colab_qwen: "Colab Qwen (Tier 1)",
+  deepseek: "DeepSeek (Tier 2)",
+  gemini: "Gemini (Tier 3)",
+  serper: "Serper Search"
+};
+
+async function loadAnalytics() {
+  const jobId = (document.getElementById("analytics-job-id")?.value || "").trim();
+  const provider = document.getElementById("analytics-provider-filter")?.value || "";
+  const statusFilter = document.getElementById("analytics-status-filter")?.value || "";
+
+  const ovParams = new URLSearchParams();
+  if (jobId) ovParams.set("job_id", jobId);
+  const trParams = new URLSearchParams({ limit: "60" });
+  if (jobId) trParams.set("job_id", jobId);
+  if (provider) trParams.set("provider", provider);
+  if (statusFilter) trParams.set("status", statusFilter);
+
+  try {
+    const [ovRes, trRes] = await Promise.all([
+      fetch(`/api/v1/analytics/overview?${ovParams.toString()}`),
+      fetch(`/api/v1/analytics/traces?${trParams.toString()}`)
+    ]);
+    if (ovRes.ok) {
+      const ov = await ovRes.json();
+      const cardsEl = document.getElementById("analytics-provider-cards");
+      const order = ["colab_qwen", "deepseek", "gemini", "serper"];
+      let totalCalls = 0;
+      cardsEl.innerHTML = order.map(key => {
+        const p = (ov.providers || {})[key] || { total_calls: 0, ok_count: 0, failed_count: 0, avg_latency_ms: 0, max_latency_ms: 0, last_error: null };
+        totalCalls += p.total_calls;
+        const hasErr = p.failed_count > 0;
+        const statusBadge = p.total_calls === 0
+          ? `<span class="p12-badge p12-badge-muted">Idle</span>`
+          : hasErr
+            ? `<span class="p12-badge p12-badge-err">Alert (${p.failed_count} fail)</span>`
+            : `<span class="p12-badge p12-badge-ok">Healthy</span>`;
+        const errBox = p.last_error
+          ? `<div class="provider-err-box"><strong>${esc(p.last_error.status)}</strong>: ${esc(p.last_error.detail)}</div>`
+          : "";
+        return `
+          <div class="provider-card ${hasErr ? "has-error" : ""}">
+            <div class="provider-hdr">
+              <span class="provider-name">${esc(PROVIDER_LABELS[key] || key)}</span>
+              ${statusBadge}
+            </div>
+            <div class="provider-stats">
+              <div>Calls: <strong>${p.total_calls}</strong></div>
+              <div>OK / Fail: <strong style="color:var(--accent-green);">${p.ok_count}</strong> / <strong style="color:${hasErr ? "var(--accent-red)" : "var(--text-muted)"};">${p.failed_count}</strong></div>
+              <div>Avg: <strong>${p.avg_latency_ms} ms</strong></div>
+              <div>Max: <strong>${p.max_latency_ms} ms</strong></div>
+            </div>
+            ${errBox}
+          </div>
+        `;
+      }).join("");
+      document.getElementById("tab-count-analytics").textContent = totalCalls;
+
+      const failBox = document.getElementById("analytics-failure-summary");
+      const breaks = ov.failure_breakdown || [];
+      if (!breaks.length) {
+        failBox.className = "failure-box clean";
+        failBox.innerHTML = "&#10003; No API breakages, tunnel drops, or auth errors recorded.";
+      } else {
+        failBox.className = "failure-box";
+        failBox.innerHTML = `<strong>Failure / Breakage Summary (${breaks.length} pattern${breaks.length > 1 ? "s" : ""}):</strong>` +
+          breaks.map(b => `<div style="margin-top:4px;"><span class="p12-badge p12-badge-err">${esc(b.provider)}</span> <span class="p12-badge p12-badge-warn">${esc(b.status)} &times; ${b.count}</span> <span style="color:var(--text-secondary);">${esc(b.error_detail)}</span></div>`).join("");
+      }
+    }
+
+    if (trRes.ok) {
+      const traces = await trRes.json();
+      const tbody = document.getElementById("analytics-traces-body");
+      if (!traces.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No API traces match filter.</td></tr>`;
+      } else {
+        tbody.innerHTML = traces.map(t => {
+          const ok = t.status === "ok";
+          const stCls = ok ? "p12-badge-ok" : "p12-badge-err";
+          const ts = (t.created_at || "").replace("T", " ").slice(11, 19);
+          return `
+            <tr class="clickable-row" onclick="openTraceDetail('${esc(t.trace_id)}')" title="Click to inspect full sent prompt & raw response">
+              <td style="font-family:var(--font-mono); font-size:11.5px;">${esc(ts)}</td>
+              <td><strong>${esc(t.provider)}</strong><div style="font-size:11px; color:var(--text-muted);">${esc(t.model)}</div></td>
+              <td><span class="p12-badge p12-badge-muted">${esc(t.stage || "-")}</span><div style="font-size:11px; color:var(--text-secondary);">${esc(t.domain || "-")}</div></td>
+              <td><span class="p12-badge ${stCls}">${esc(t.status)}</span></td>
+              <td style="font-family:var(--font-mono);"><strong>${esc(t.latency_ms)} ms</strong></td>
+              <td style="font-size:11.5px; color:var(--text-secondary); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(t.error_detail || "OK (click to inspect)")}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+  } catch (e) {
+    console.error("Analytics load error:", e);
+  }
+}
+
+async function openTraceDetail(traceId) {
+  const modal = document.getElementById("trace-modal-backdrop");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.getElementById("trace-modal-title").textContent = `Trace ${traceId}`;
+  document.getElementById("trace-modal-meta").textContent = "Loading...";
+  document.getElementById("trace-modal-req").textContent = "Loading...";
+  document.getElementById("trace-modal-res").textContent = "Loading...";
+  document.getElementById("trace-modal-error").classList.add("hidden");
+  try {
+    const res = await fetch(`/api/v1/analytics/traces/${encodeURIComponent(traceId)}`);
+    if (!res.ok) return;
+    const t = await res.json();
+    document.getElementById("trace-modal-title").textContent = `${t.provider} · ${t.model} (${t.status})`;
+    document.getElementById("trace-modal-meta").textContent =
+      `Trace: ${t.trace_id} · Job: ${t.job_id || "-"} · Domain: ${t.domain || "-"} · Stage: ${t.stage || "-"} · HTTP: ${t.http_status ?? "-"} · Latency: ${t.latency_ms} ms`;
+    if (t.error_detail) {
+      const errEl = document.getElementById("trace-modal-error");
+      errEl.textContent = t.error_detail;
+      errEl.classList.remove("hidden");
+    }
+    document.getElementById("trace-modal-req").textContent = t.request_payload || "(empty)";
+    document.getElementById("trace-modal-res").textContent = t.response_payload || "(empty)";
+  } catch (e) {
+    document.getElementById("trace-modal-req").textContent = `Error: ${e.message}`;
+  }
+}
+
+function closeTraceModal() {
+  document.getElementById("trace-modal-backdrop")?.classList.add("hidden");
+}
+
+// =========================================================================
+// Live Un-Truncated Run Logs Viewer
 // =========================================================================
 async function fetchIncrementalJobLogs(jobId) {
   if (!jobId) return;
@@ -394,7 +678,6 @@ async function reloadLogsFromStart() {
   state.logEntries = [];
   document.getElementById("log-file-label").textContent = `logs/jobs/${jid}.jsonl`;
   document.getElementById("log-viewer-box").innerHTML = "";
-  // Loop until all pages loaded so zero lines are truncated
   while (true) {
     const prev = state.logOffset;
     await fetchIncrementalJobLogs(jid);
@@ -412,7 +695,7 @@ function downloadCurrentJobLogs() {
 }
 
 // =========================================================================
-// Section 06: Admin Config & 3-Step Diff-Sync
+// Admin Config & 3-Step Diff-Sync
 // =========================================================================
 async function loadAdminConfig() {
   try {
@@ -422,15 +705,22 @@ async function loadAdminConfig() {
     document.getElementById("adm-max-depts").value = c.max_departments_per_request;
     document.getElementById("adm-max-unis").value = c.max_universities_per_job;
     document.getElementById("adm-max-profs").value = c.max_professors_per_uni;
-    if (document.getElementById("adm-max-concurrent")) {
-      document.getElementById("adm-max-concurrent").value = c.max_concurrent_universities ?? 2;
-    }
+    document.getElementById("adm-max-concurrent").value = c.max_concurrent_universities ?? 5;
     document.getElementById("adm-countries").value = (c.allowed_countries || []).join(", ");
-    document.getElementById("adm-enable-serper").checked = Boolean(c.enable_serper);
-    document.getElementById("adm-enable-playwright").checked = Boolean(c.enable_playwright);
-    document.getElementById("adm-enable-agent").checked = Boolean(c.enable_agent_fallback);
-    document.getElementById("adm-enable-colab").checked = Boolean(c.enable_colab_bridge);
-    document.getElementById("adm-enable-llm").checked = Boolean(c.enable_llm_extraction);
+    const map = [
+      ["adm-enable-serper", c.enable_serper],
+      ["adm-enable-playwright", c.enable_playwright],
+      ["adm-enable-agent", c.enable_agent_fallback],
+      ["adm-enable-colab", c.enable_colab_bridge],
+      ["adm-enable-llm", c.enable_llm_extraction]
+    ];
+    map.forEach(([id, val]) => {
+      const cb = document.getElementById(id);
+      if (cb) {
+        cb.checked = Boolean(val);
+        syncTogglePill(cb);
+      }
+    });
   } catch (e) {
     console.error("Admin config load error:", e);
   }
@@ -443,7 +733,7 @@ async function saveAdminConfig(btn) {
       max_departments_per_request: parseInt(document.getElementById("adm-max-depts").value, 10),
       max_universities_per_job: parseInt(document.getElementById("adm-max-unis").value, 10),
       max_professors_per_uni: parseInt(document.getElementById("adm-max-profs").value, 10),
-      max_concurrent_universities: parseInt(document.getElementById("adm-max-concurrent")?.value || "2", 10),
+      max_concurrent_universities: parseInt(document.getElementById("adm-max-concurrent")?.value || "5", 10),
       allowed_countries: document.getElementById("adm-countries").value.split(",").map(s => s.trim()).filter(Boolean),
       enable_serper: document.getElementById("adm-enable-serper").checked,
       enable_playwright: document.getElementById("adm-enable-playwright").checked,
@@ -456,7 +746,7 @@ async function saveAdminConfig(btn) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    if (res.ok) showToast("Admin config saved!");
+    if (res.ok) showToast("✓ Admin config saved!");
     else showToast("Save failed: " + (await res.text()));
   } finally {
     btn.disabled = false;
@@ -499,6 +789,7 @@ async function refreshAllData() {
     loadUniversitiesOverview(),
     loadProfessors(),
     loadNeedsReview(),
+    loadAnalytics(),
     loadAdminConfig()
   ]);
 }

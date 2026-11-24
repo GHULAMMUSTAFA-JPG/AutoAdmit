@@ -55,6 +55,24 @@ GLOBAL_CHROME_SELECTORS = (
     ".global-nav", ".header", ".footer", "#header", "#footer", "#nav", ".menu",
     ".topbar", ".site-header", ".site-footer",
 )
+CAROUSEL_SELECTORS = (
+    ".swiper", ".slick", ".carousel", ".slider",
+    '[class*="carousel"]', '[class*="swiper"]', '[class*="slider"]', '[class*="slick"]',
+)
+ORG_NAME_REJECT_KEYWORDS = (
+    "学院", "学系", "研究院", "研究所", "中心", "学部",
+    "school", "department", "college", "institute", "center", "university",
+)
+ROOT_OR_INDEX_PATHS = (
+    "", "/", "/index.htm", "/index.html", "/index.php", "/index.jsp",
+    "/main.psp", "/default.aspx", "/default.htm", "/default.html",
+)
+
+
+def is_root_or_index_url(url: str) -> bool:
+    """Returns True if URL is a homepage or root/index entry point (never a faculty roster)."""
+    path_low = (urlparse(url or "").path or "/").lower().strip()
+    return path_low in ROOT_OR_INDEX_PATHS
 
 
 def registrable_domain(host: str) -> str:
@@ -141,23 +159,35 @@ def compute_sha256(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
-def _looks_like_person_name(raw: str) -> bool:
-    cleaned = TITLE_BRACKET_RE.sub("", raw or "").strip()
+def is_plausible_person_name(raw: str) -> bool:
+    """Validates person-name anchors while strictly rejecting organizational/school/college names."""
+    text = (raw or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if any(kw in low for kw in ORG_NAME_REJECT_KEYWORDS):
+        return False
+    cleaned = TITLE_BRACKET_RE.sub("", text).strip()
+    if not cleaned:
+        return False
     if CJK_NAME_RE.match(cleaned) and cleaned[0] in SURNAMES:
         return True
     return bool(EN_NAME_RE.match(cleaned))
 
 
+_looks_like_person_name = is_plausible_person_name
+
+
 def extract_profile_urls(html: str, base_url: str, root_domain: str | None = None) -> list[str]:
     """
     Main-body-only professor profile link extractor:
-    1. Strips <header>, <nav>, <footer>, .breadcrumb, and global nav menus before scanning.
+    1. Strips <header>, <nav>, <footer>, .breadcrumb, global nav menus, AND slider/carousel strips before scanning.
     2. Enforces strict same-root-domain lock (blocks external domains like 720yun.com).
     3. Applies strict URL & anchor denylist (drops /news, /about, /login, /Schools___Colleges/, root index).
-    4. Prioritizes person-name anchors and faculty profile URL patterns.
+    4. Prioritizes plausible person-name anchors (rejecting org/college names) and faculty profile URL patterns.
     """
     tree = LexborHTMLParser(html or "")
-    for sel in GLOBAL_CHROME_SELECTORS:
+    for sel in (*GLOBAL_CHROME_SELECTORS, *CAROUSEL_SELECTORS):
         for node in tree.css(sel):
             node.decompose()
 
@@ -210,12 +240,18 @@ def verify_roster_html(
     *,
     root_domain: str | None = None,
     min_profiles: int = 3,
+    node_type: str | None = None,
 ) -> tuple[bool, list[str]]:
     """
     Shared Deterministic Roster Verification Gate (used by SiteTreeBuilder & Phase1Discovery):
-    A candidate URL is accepted ONLY if its cleaned main-body yields >= 3 plausible same-domain profile links.
+    - NEVER accepts HOME, SCHOOLS_DIR, DEPT_HOME, or root/index URLs (/, /index.htm, /index.html, /main.psp).
+    - Accepts ONLY if cleaned main-body (with carousels stripped) yields >= 3 plausible same-domain profile links.
     """
     if not html or not url:
+        return False, []
+    if node_type in ("HOME", "SCHOOLS_DIR", "DEPT_HOME"):
+        return False, []
+    if is_root_or_index_url(url):
         return False, []
     candidates = extract_profile_urls(html, url, root_domain=root_domain)
     return len(candidates) >= min_profiles, candidates

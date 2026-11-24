@@ -1,9 +1,12 @@
 """FastAPI routes for job start, job status, un-truncated per-run logs, professors, needs-review, and summary."""
 
 import asyncio
+import csv
+import io
+import json
 import uuid
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.core.logging import get_job_log_path, read_job_logs
 from app.db.repositories import Repository
@@ -171,17 +174,20 @@ async def download_job_logs(job_id: str):
 
 @router.get("/universities")
 async def list_universities_overview(request: Request):
-    """Returns seeded universities enriched with latest Phase 1 dept status and verified professor counts."""
+    """Returns seeded universities enriched with site tree nav_type, mapped depts, Phase 1 status, and verified professor counts."""
     repo = _get_repo(request)
     seeds = await repo.query_university_seeds(limit=500)
     depts = await repo.list_department_docs()
     profs = await repo.list_professors()
+    trees = await repo.list_site_trees(limit=500)
 
     dept_by_dom = {}
     for d in depts:
         prev = dept_by_dom.get(d.domain)
         if not prev or d.status == "COMPLETE":
             dept_by_dom[d.domain] = d
+
+    tree_by_dom = {t.domain: t for t in trees}
 
     prof_counts: dict[str, int] = {}
     for p in profs:
@@ -190,18 +196,26 @@ async def list_universities_overview(request: Request):
     rows = []
     for s in seeds:
         d = dept_by_dom.get(s.domain)
+        t = tree_by_dom.get(s.domain)
+        roster_url = d.faculty_roster_url if d else None
+        if not roster_url and t and t.verified_rosters:
+            first_vr = next(iter(t.verified_rosters.values()))
+            roster_url = first_vr.roster_url
         rows.append({
             "domain": s.domain,
             "name": s.name,
             "chinese_name": s.chinese_name,
             "region": s.region,
             "rank": s.rank,
+            "nav_type": t.nav_type if t else "UNKNOWN",
+            "departments_mapped_count": len(t.departments_map) if t else 0,
+            "verified_rosters_count": len(t.verified_rosters) if t else 0,
             "winning_strategy": d.winning_strategy if d else "PENDING",
-            "faculty_roster_url": d.faculty_roster_url if d else None,
+            "faculty_roster_url": roster_url,
             "department_url": d.department_url if d else None,
             "professors_found": prof_counts.get(s.domain, 0),
             "professors_verified": prof_counts.get(s.domain, 0),
-            "status": d.status if d else "PENDING",
+            "status": d.status if d else ("COMPLETE" if (t and t.verified_rosters) else "PENDING"),
             "error_code": d.error_code if d else None,
             "detail": "",
         })
@@ -227,8 +241,11 @@ async def list_professors_endpoint(
         profs = [
             p for p in profs
             if q in p.name.lower()
+            or q in (p.name_en or "").lower()
+            or q in (p.title_en or "").lower()
             or q in p.university_domain.lower()
             or any(q in ri.lower() for ri in p.research_interests)
+            or any(q in ra.lower() for ra in p.research_areas_en)
         ]
     return profs
 
@@ -238,11 +255,90 @@ async def list_needs_review_endpoint(
     request: Request,
     domain: str | None = Query(None),
     stage: str | None = Query(None),
+    error_code: str | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
 ):
     """Lists failed, robots-disallowed, or ungrounded items from `needs_review`."""
     repo = _get_repo(request)
-    return await repo.list_needs_review(domain=domain, stage=stage, limit=limit)
+    items = await repo.list_needs_review(domain=domain, stage=stage, limit=limit)
+    if error_code:
+        ec = error_code.strip()
+        items = [it for it in items if it.error_code == ec]
+    return items
+
+
+@router.get("/export/universities")
+async def export_universities_data(
+    request: Request,
+    fmt: str = Query("csv", alias="format"),
+):
+    """Downloads universities overview + site tree + verified professor counts as CSV or JSON."""
+    rows = await list_universities_overview(request)
+    if fmt.lower() == "json":
+        content = json.dumps(rows, ensure_ascii=False, indent=2)
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="autoadmit_universities.json"'},
+        )
+    buf = io.StringIO()
+    fields = [
+        "rank", "domain", "name", "chinese_name", "region", "nav_type", "status",
+        "winning_strategy", "faculty_roster_url", "departments_mapped_count",
+        "professors_verified", "error_code",
+    ]
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="autoadmit_universities.csv"'},
+    )
+
+
+@router.get("/export/professors")
+async def export_professors_data(
+    request: Request,
+    domain: str | None = Query(None),
+    fmt: str = Query("csv", alias="format"),
+):
+    """Downloads all verified professors (or a single university's professors when `domain` is given) as CSV or JSON."""
+    repo = _get_repo(request)
+    clean_dom = domain.lower().strip() if domain else None
+    profs = await repo.list_professors(domains=[clean_dom] if clean_dom else None)
+    safe_suffix = clean_dom.replace(".", "_") if clean_dom else "all"
+
+    if fmt.lower() == "json":
+        payload = [p.model_dump(mode="json") for p in profs]
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="professors_{safe_suffix}.json"'},
+        )
+
+    buf = io.StringIO()
+    fields = [
+        "university_domain", "department", "name_en", "name", "title_en", "title",
+        "email", "email_status", "degree_eligibility", "research_areas_en",
+        "research_interests", "canonical_profile_url", "photo_url",
+        "supervisor_evidence_quote", "status",
+    ]
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for p in profs:
+        d = p.model_dump(mode="json")
+        d["degree_eligibility"] = "; ".join(d.get("degree_eligibility") or [])
+        d["research_areas_en"] = "; ".join(d.get("research_areas_en") or [])
+        d["research_interests"] = "; ".join(d.get("research_interests") or [])
+        writer.writerow(d)
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="professors_{safe_suffix}.csv"'},
+    )
 
 
 @router.get("/system/summary")

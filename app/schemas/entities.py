@@ -53,11 +53,15 @@ class ProfessorDoc(BaseModel):
     department: str
     source_roster_url: str
     name: str
+    name_en: str = ""
     title: str = ""
+    title_en: str = ""
     email: str = ""
     email_status: Literal["FOUND", "MISSING", "IMAGE_EMBEDDED"] = "MISSING"
     degree_eligibility: list[str] = Field(default_factory=list)
     research_interests: list[str] = Field(default_factory=list)
+    research_areas_en: list[str] = Field(default_factory=list)
+    photo_url: str = ""
     name_evidence_quote: str = ""
     supervisor_evidence_quote: str = ""
     grounding_status: Literal["VERIFIED", "UNGROUNDED"] = "VERIFIED"
@@ -114,8 +118,27 @@ class UniversitySiteTreeDoc(BaseModel):
     """Permanent pruned site hierarchy + department map + verified rosters in `university_site_trees`."""
     domain: str
     root_url: str
+    nav_type: Literal["SEMANTIC_NAV", "DIV_BASED_NAV", "UNKNOWN"] = "UNKNOWN"
     markdown_tree: str = ""
     nodes: list[SiteTreeNode] = Field(default_factory=list)
     departments_map: dict[str, str] = Field(default_factory=dict)
     verified_rosters: dict[str, VerifiedRosterEntry] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ApiCallTraceDoc(BaseModel):
+    """Per-attempt LLM / Serper API latency and breakage trace in `api_call_traces`."""
+    trace_id: str
+    job_id: str = ""
+    domain: str = ""
+    stage: str = ""
+    provider: str
+    model: str = ""
+    tier: int = 0
+    status: str = "ok"
+    http_status: int | None = None
+    error_detail: str = ""
+    latency_ms: int = 0
+    request_payload: str = ""
+    response_payload: str = ""
+    created_at: datetime = Field(default_factory=utc_now)

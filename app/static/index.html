@@ -3,41 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AutoAdmit P12 — China Supervisor Discovery &amp; Extraction Engine</title>
+  <title>AutoAdmit P12 — Supervisor Discovery &amp; Analytics Workspace</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
-    .p12-nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 24px; background: #fff; border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; z-index: 100; }
-    .p12-nav a { text-decoration: none; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); padding: 6px 12px; border-radius: 6px; border: 1px solid transparent; }
-    .p12-nav a:hover, .p12-nav a.active { background: var(--primary-subtle); color: var(--primary); border-color: #bfdbfe; }
-    .p12-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-    @media (max-width: 900px) { .p12-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    .p12-kpi { background: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px 14px; }
-    .p12-kpi-label { font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
-    .p12-kpi-val { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-top: 2px; }
-    .p12-grid-5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; align-items: end; }
-    @media (max-width: 1000px) { .p12-grid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    .p12-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .saas-main { max-width: 1520px; width: 100%; margin: 0 auto; padding: 16px 24px 48px; }
+    .saas-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    @media (max-width: 960px) { .saas-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .saas-kpi { background: #fff; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow-sm); }
+    .saas-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--text-muted); }
+    .saas-kpi-val { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-top: 2px; font-family: var(--font-mono); }
+
+    .saas-card { background: #fff; border: 1px solid var(--border-subtle); border-radius: 12px; box-shadow: var(--shadow-card); margin-bottom: 16px; overflow: hidden; }
+    .saas-card-body { padding: 14px 18px; }
+    .saas-filter-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: end; }
+    @media (max-width: 1024px) { .saas-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .saas-actions-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; justify-content: space-between; }
+    .saas-btn-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* Pill Tabs */
+    .saas-tabs-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 16px; background: #f8fafc; border-bottom: 1px solid var(--border-subtle); }
+    .saas-tab-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .saas-tab-btn { border: 1px solid transparent; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease; }
+    .saas-tab-btn:hover { background: #e2e8f0; color: var(--text-primary); }
+    .saas-tab-btn.active { background: var(--primary); color: #fff; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25); }
+    .saas-tab-count { font-size: 11px; font-family: var(--font-mono); padding: 1px 6px; border-radius: 999px; background: rgba(15, 23, 42, 0.08); }
+    .saas-tab-btn.active .saas-tab-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+    .saas-tab-pane { display: none; padding: 14px 18px; }
+    .saas-tab-pane.active { display: block; }
+
+    /* Badges */
+    .p12-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
     .p12-badge-ok { background: var(--accent-green-subtle); color: var(--accent-green); border: 1px solid var(--accent-green-border); }
     .p12-badge-warn { background: var(--accent-amber-subtle); color: var(--accent-amber); border: 1px solid var(--accent-amber-border); }
     .p12-badge-err { background: var(--accent-red-subtle); color: var(--accent-red); border: 1px solid var(--accent-red-border); }
     .p12-badge-info { background: var(--primary-subtle); color: var(--primary); border: 1px solid #bfdbfe; }
     .p12-badge-muted { background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-    .p12-table-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: 10px; }
-    .p12-table { width: 100%; border-collapse: collapse; min-width: 860px; font-size: 13px; }
-    .p12-table th { text-align: left; padding: 10px 12px; background: var(--bg-subtle); font-size: 11px; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
-    .p12-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
-    .p12-table tr:hover td { background: #f8fafc; }
-    .p12-log-box { background: #0f172a; color: #e2e8f0; font-family: var(--font-mono); font-size: 12px; padding: 12px; border-radius: 10px; height: 380px; overflow-y: auto; line-height: 1.5; }
+    .p12-badge-purple { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+
+    /* Scrollable Sticky Tables */
+    .saas-scroll-540 { max-height: 540px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: 10px; }
+    .saas-scroll-340 { max-height: 340px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: 10px; }
+    .saas-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .saas-table thead th { position: sticky; top: 0; z-index: 10; text-align: left; padding: 10px 12px; background: #f8fafc; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); }
+    .saas-table tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+    .saas-table tbody tr:hover td { background: #f8fafc; }
+    .saas-table tbody tr.clickable-row { cursor: pointer; }
+
+    /* Avatar & Bilingual Clamp */
+    .prof-cell { display: flex; align-items: center; gap: 10px; min-width: 210px; }
+    .prof-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border-subtle); flex-shrink: 0; background: #eff6ff; }
+    .prof-avatar-fallback { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #1e40af); color: #fff; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 210px; font-size: 12px; color: var(--text-secondary); line-height: 1.35; }
+    .copy-btn { border: 1px solid var(--border-subtle); background: #fff; color: var(--text-secondary); border-radius: 5px; padding: 2px 6px; font-size: 11px; cursor: pointer; margin-left: 4px; }
+    .copy-btn:hover { background: var(--primary-subtle); color: var(--primary); border-color: #bfdbfe; }
+
+    /* Analytics Provider Cards */
+    .analytics-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+    @media (max-width: 1024px) { .analytics-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .provider-card { border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px 14px; background: #fff; }
+    .provider-card.has-error { border-color: var(--accent-red-border); background: #fffafb; }
+    .provider-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .provider-name { font-weight: 700; font-size: 13.5px; color: var(--text-primary); }
+    .provider-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; font-family: var(--font-mono); }
+    .provider-err-box { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: var(--accent-red-subtle); color: var(--accent-red); font-size: 11px; word-break: break-word; }
+
+    /* Failure Summary Box */
+    .failure-box { border: 1px solid var(--accent-amber-border); background: var(--accent-amber-subtle); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; }
+    .failure-box.clean { border-color: var(--accent-green-border); background: var(--accent-green-subtle); color: var(--accent-green); }
+
+    /* Banner & Toolbar */
+    .p12-banner { padding: 10px 14px; border-radius: 10px; border: 1px solid #bfdbfe; background: var(--primary-subtle); margin-top: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12.5px; }
+    .tab-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .tab-toolbar-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* Collapsible Admin & Logs Drawer */
+    .collapsible-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; background: #f8fafc; border: none; cursor: pointer; font-weight: 700; font-size: 13px; color: var(--text-primary); text-align: left; }
+    .collapsible-bar:hover { background: #f1f5f9; }
+    .p12-admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 960px) { .p12-admin-grid { grid-template-columns: 1fr; } }
+
+    /* Crisp Green Checkmark Toggle Row */
+    .toggle-pill-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: #fff; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+    .toggle-pill-row.enabled { border-color: var(--accent-green-border); background: #f6fef9; }
+    .toggle-pill-right { display: inline-flex; align-items: center; gap: 8px; }
+    .toggle-check-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-subtle); }
+    .toggle-pill-row.enabled .toggle-check-badge { background: var(--accent-green); color: #fff; border-color: var(--accent-green); }
+
+    /* Log Box */
+    .p12-log-box { background: #0f172a; color: #e2e8f0; font-family: var(--font-mono); font-size: 11.5px; padding: 12px; border-radius: 10px; height: 320px; overflow-y: auto; line-height: 1.5; }
     .p12-log-line { padding: 2px 0; border-bottom: 1px solid rgba(148,163,184,0.12); word-break: break-word; }
     .p12-log-line.warning { color: #fcd34d; }
     .p12-log-line.error { color: #fca5a5; }
-    .p12-admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media (max-width: 900px) { .p12-admin-grid { grid-template-columns: 1fr; } }
-    .p12-toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: #fff; margin-bottom: 8px; }
-    .p12-banner { padding: 12px 14px; border-radius: 10px; border: 1px solid #bfdbfe; background: var(--primary-subtle); margin-top: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+
+    /* Modal / Drawer */
+    .saas-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(4px); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .saas-modal-backdrop.hidden { display: none !important; }
+    .saas-modal { background: #fff; border-radius: 14px; border: 1px solid var(--border-subtle); box-shadow: var(--shadow-lg); width: 100%; max-width: 1080px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+    .saas-modal-hdr { padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
+    .saas-modal-body { padding: 16px 18px; overflow-y: auto; }
+    .saas-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 800px) { .saas-split { grid-template-columns: 1fr; } }
+    .saas-code-pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11.5px; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+
     .p12-toast { position: fixed; bottom: 18px; right: 18px; z-index: 9999; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow-lg); }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body class="enterprise-body">
@@ -48,8 +119,8 @@
         <div class="brand-group">
           <div class="brand-badge">AutoAdmit P12</div>
           <div class="brand-info">
-            <span class="brand-title">China Supervisor Discovery &amp; Grounded Extraction</span>
-            <span class="brand-subtitle">Permanent MongoDB Storage &middot; Multi-Key LLM Router &middot; Colab T4 GPU Bridge</span>
+            <span class="brand-title">China Supervisor Discovery &amp; Analytics Workspace</span>
+            <span class="brand-subtitle">2-Step Tree Pipeline &middot; Permanent MongoDB &middot; 3-Tier LLM Router</span>
           </div>
         </div>
         <div class="header-controls-group">
@@ -58,202 +129,201 @@
             <span id="hdr-job-badge" class="p12-badge p12-badge-muted">Idle</span>
           </div>
           <div class="control-box db-box">
-            <span class="control-label">MongoDB Summary</span>
+            <span class="control-label">MongoDB</span>
             <div class="db-status">
               <span class="status-dot-pulse"></span>
               <span id="hdr-summary-text">Loading...</span>
             </div>
           </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-secondary btn-sm" onclick="downloadUniversities('csv')" title="Download Universities CSV">&#8681; Unis CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('', 'csv')" title="Download All Professors CSV">&#8681; All Profs CSV</button>
+          </div>
         </div>
       </div>
     </header>
 
-    <!-- Section Jump Nav -->
-    <nav class="p12-nav">
-      <a href="#sec-discovery" class="active">01 Discovery &amp; Job Start</a>
-      <a href="#sec-universities">02 Universities Directory</a>
-      <a href="#sec-professors">03 Verified Professors</a>
-      <a href="#sec-review">04 Needs Review</a>
-      <a href="#sec-logs">05 Full Run Logs</a>
-      <a href="#sec-admin">06 Admin &amp; Diff-Sync</a>
-    </nav>
-
-    <main class="enterprise-main">
-      <!-- KPI Summary Bar -->
-      <div class="p12-kpis">
-        <div class="p12-kpi"><div class="p12-kpi-label">Universities Seeded</div><div class="p12-kpi-val" id="kpi-universities">0</div></div>
-        <div class="p12-kpi"><div class="p12-kpi-label">Resolved Depts</div><div class="p12-kpi-val" id="kpi-depts">0</div></div>
-        <div class="p12-kpi"><div class="p12-kpi-label">Permanent Snapshots</div><div class="p12-kpi-val" id="kpi-snapshots">0</div></div>
-        <div class="p12-kpi"><div class="p12-kpi-label">Verified Professors</div><div class="p12-kpi-val" id="kpi-professors" style="color:var(--accent-green);">0</div></div>
-        <div class="p12-kpi"><div class="p12-kpi-label">Needs Review</div><div class="p12-kpi-val" id="kpi-review" style="color:var(--accent-amber);">0</div></div>
+    <main class="saas-main">
+      <!-- Compact KPI Strip -->
+      <div class="saas-kpis">
+        <div class="saas-kpi"><div class="saas-kpi-label">Universities</div><div class="saas-kpi-val" id="kpi-universities">0</div></div>
+        <div class="saas-kpi"><div class="saas-kpi-label">Site Trees</div><div class="saas-kpi-val" id="kpi-depts">0</div></div>
+        <div class="saas-kpi"><div class="saas-kpi-label">Snapshots</div><div class="saas-kpi-val" id="kpi-snapshots">0</div></div>
+        <div class="saas-kpi"><div class="saas-kpi-label">Verified Professors</div><div class="saas-kpi-val" id="kpi-professors" style="color:var(--accent-green);">0</div></div>
+        <div class="saas-kpi"><div class="saas-kpi-label">Needs Review</div><div class="saas-kpi-val" id="kpi-review" style="color:var(--accent-amber);">0</div></div>
       </div>
 
-      <!-- SECTION 01: Discovery Filter Panel (p12 DiscoveryRequest) -->
-      <section id="sec-discovery" class="enterprise-card page-section">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">01</span>
-            <span class="indicator-title">DISCOVERY FILTER PANEL &amp; JOB LAUNCHER</span>
-          </div>
-          <span class="status-note">POST /api/v1/jobs/start (Instant $0 DB return if already cached)</span>
-        </div>
-        <div class="card-body">
-          <div class="p12-grid-5">
-            <div class="form-group">
+      <!-- Compact Top Control & Progress Bar -->
+      <section class="saas-card">
+        <div class="saas-card-body">
+          <div class="saas-filter-grid">
+            <div class="form-group" style="margin:0;">
               <label for="f-country">Country</label>
               <input type="text" id="f-country" class="form-control" value="China" />
             </div>
-            <div class="form-group">
+            <div class="form-group" style="margin:0;">
               <label for="f-regions">Regions (blank = all)</label>
               <input type="text" id="f-regions" class="form-control" placeholder="e.g. Beijing, Shanghai" />
             </div>
-            <div class="form-group">
-              <label for="f-departments">Department(s)</label>
-              <input type="text" id="f-departments" class="form-control" value="Computer Science" placeholder="Computer Science" />
+            <div class="form-group" style="margin:0;">
+              <label for="f-departments">Department</label>
+              <input type="text" id="f-departments" class="form-control" value="Computer Science" />
             </div>
-            <div class="form-group">
-              <label for="f-degree">Degree Level</label>
+            <div class="form-group" style="margin:0;">
+              <label for="f-degree">Degree</label>
               <select id="f-degree" class="form-control">
                 <option value="masters" selected>Master's (masters)</option>
                 <option value="phd">PhD (phd)</option>
                 <option value="both">Both (both)</option>
               </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="margin:0;">
               <label for="f-tier">Ranking Tier</label>
               <select id="f-tier" class="form-control">
-                <option value="top_3">Top 3 (top_3)</option>
-                <option value="top_5">Top 5 (top_5)</option>
-                <option value="top_10" selected>Top 10 (top_10)</option>
-                <option value="top_25">Top 25 (top_25)</option>
-                <option value="all">All Seeded (all)</option>
+                <option value="top_3">Top 3</option>
+                <option value="top_5">Top 5</option>
+                <option value="top_10" selected>Top 10</option>
+                <option value="top_25">Top 25</option>
+                <option value="all">All Seeded</option>
               </select>
             </div>
           </div>
 
-          <div style="margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <button id="btn-start-job" class="btn btn-primary" onclick="startDiscoveryJob(this)">&#9654; Start Discovery &amp; Extraction</button>
-            <button id="btn-build-trees-only" class="btn btn-secondary" onclick="buildTreesOnly(this)">🌳 Build &amp; Verify Trees Only</button>
-            <button class="btn btn-secondary" onclick="refreshAllData()">&#8635; Refresh All Data</button>
-            <span id="job-status-msg" style="font-size: 13px; color: var(--text-secondary);"></span>
+          <div class="saas-actions-row">
+            <div class="saas-btn-group">
+              <button id="btn-build-trees-only" class="btn btn-primary" onclick="buildTreesOnly(this)">1. Build &amp; Verify Trees</button>
+              <button id="btn-extract-trees" class="btn btn-success" onclick="extractFromVerifiedTrees(this)">2. Extract from Verified Trees</button>
+              <button id="btn-start-job" class="btn btn-secondary" onclick="startDiscoveryJob(this)">&#9654; Run Full Pipeline</button>
+              <button class="btn btn-secondary btn-sm" onclick="refreshAllData()">&#8635; Refresh</button>
+            </div>
+            <span id="job-status-msg" style="font-size:12.5px; color:var(--text-secondary);"></span>
           </div>
 
           <div id="active-job-banner" class="p12-banner hidden">
             <div>
               <strong id="banner-job-title">Job running...</strong>
-              <div id="banner-job-scorecard" style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;"></div>
+              <div id="banner-job-scorecard" style="font-size:12px; color:var(--text-secondary); margin-top:2px;"></div>
             </div>
-            <div style="display:flex; gap:8px;">
-              <a href="#sec-logs" class="btn btn-secondary btn-sm">View Full Run Logs</a>
+            <div class="saas-btn-group">
+              <button class="btn btn-secondary btn-sm" onclick="openAdminLogsDrawer(true)">View Live Logs</button>
               <button class="btn btn-secondary btn-sm" onclick="downloadCurrentJobLogs()">&#8681; Download .jsonl</button>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- SECTION 02: University Rows Table -->
-      <section id="sec-universities" class="enterprise-card page-section mt-4">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">02</span>
-            <span class="indicator-title">UNIVERSITIES DIRECTORY &amp; LIVE RUN PROGRESS (<span id="uni-row-count">0</span>)</span>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" id="uni-search" class="form-control" style="width:220px; padding:5px 9px;" placeholder="Filter university/region..." oninput="renderUniversitiesTable()" />
-            <button class="btn btn-secondary btn-sm" onclick="loadUniversitiesOverview()">&#8635; Reload</button>
+      <!-- Unified 4-Tab Workspace Card -->
+      <section class="saas-card">
+        <div class="saas-tabs-header">
+          <div class="saas-tab-pills" role="tablist">
+            <button class="saas-tab-btn active" data-tab="tab-trees" onclick="switchTab('tab-trees', this)">
+              Universities &amp; Trees <span class="saas-tab-count" id="tab-count-trees">0</span>
+            </button>
+            <button class="saas-tab-btn" data-tab="tab-professors" onclick="switchTab('tab-professors', this)">
+              Verified Professors <span class="saas-tab-count" id="tab-count-profs">0</span>
+            </button>
+            <button class="saas-tab-btn" data-tab="tab-review" onclick="switchTab('tab-review', this)">
+              Needs Review <span class="saas-tab-count" id="tab-count-review">0</span>
+            </button>
+            <button class="saas-tab-btn" data-tab="tab-analytics" onclick="switchTab('tab-analytics', this)">
+              LLM &amp; API Analytics <span class="saas-tab-count" id="tab-count-analytics">0</span>
+            </button>
           </div>
         </div>
-        <div class="card-body">
-          <div class="p12-table-wrap">
-            <table class="p12-table">
+
+        <!-- TAB 1: Universities & Trees -->
+        <div id="tab-trees" class="saas-tab-pane active">
+          <div class="tab-toolbar">
+            <div class="tab-toolbar-group">
+              <input type="text" id="uni-search" class="form-control form-control-sm" style="width:240px;" placeholder="Filter domain, name, region..." oninput="renderUniversitiesTable()" />
+              <button class="btn btn-secondary btn-sm" onclick="loadUniversitiesOverview()">&#8635; Reload</button>
+            </div>
+            <div class="tab-toolbar-group">
+              <button class="btn btn-secondary btn-sm" onclick="downloadUniversities('csv')">&#8681; Download Unis CSV</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadUniversities('json')">&#8681; Download Unis JSON</button>
+            </div>
+          </div>
+          <div class="saas-scroll-540">
+            <table class="saas-table">
               <thead>
                 <tr>
-                  <th style="width:60px;">Rank</th>
-                  <th>University &amp; Region</th>
-                  <th>Winning Strategy</th>
-                  <th>Faculty Roster URL</th>
-                  <th>Professors (Found / Verified)</th>
-                  <th>Status / ErrorCode</th>
-                  <th style="width:110px;">Site Tree</th>
+                  <th style="width:52px;">#</th>
+                  <th>Domain &amp; University</th>
+                  <th>Nav Type</th>
+                  <th>Status</th>
+                  <th>Verified Roster URL</th>
+                  <th>Depts Mapped</th>
+                  <th>Verified Profs</th>
+                  <th style="width:210px;">Actions &amp; Export</th>
                 </tr>
               </thead>
               <tbody id="uni-table-body">
-                <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">Loading universities...</td></tr>
+                <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">Loading universities...</td></tr>
               </tbody>
             </table>
           </div>
-
-          <!-- Inline Collapsible Site Tree Viewer -->
-          <div id="site-tree-panel" class="hidden" style="margin-top:14px; padding:14px; border:1px solid #bfdbfe; border-radius:10px; background:#f8fafc;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <strong id="site-tree-title">Site Tree</strong>
-              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('site-tree-panel').classList.add('hidden')">&times; Close</button>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-              <div>
-                <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Markdown Site Tree</div>
-                <pre id="site-tree-md" style="background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:11.5px; max-height:240px; overflow:auto; white-space:pre-wrap;"></pre>
-              </div>
-              <div>
-                <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Departments Map &amp; Verified Rosters</div>
-                <pre id="site-tree-depts" style="background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:11.5px; max-height:240px; overflow:auto; white-space:pre-wrap;"></pre>
-              </div>
-            </div>
-          </div>
         </div>
-      </section>
 
-      <!-- SECTION 03: Verified Professors Roster -->
-      <section id="sec-professors" class="enterprise-card page-section mt-4">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">03</span>
-            <span class="indicator-title">VERIFIED PROFESSORS ROSTER (<span id="prof-row-count">0</span>)</span>
+        <!-- TAB 2: Verified Professors -->
+        <div id="tab-professors" class="saas-tab-pane">
+          <div class="tab-toolbar">
+            <div class="tab-toolbar-group">
+              <input type="text" id="prof-search" class="form-control form-control-sm" style="width:210px;" placeholder="Search name, title, topic..." oninput="loadProfessors()" />
+              <select id="prof-domain-filter" class="form-control form-control-sm" style="width:185px;" onchange="loadProfessors()">
+                <option value="">All Universities</option>
+              </select>
+              <select id="prof-email-filter" class="form-control form-control-sm" style="width:155px;" onchange="loadProfessors()">
+                <option value="">All Email Status</option>
+                <option value="FOUND">FOUND</option>
+                <option value="MISSING">MISSING</option>
+                <option value="IMAGE_EMBEDDED">IMAGE_EMBEDDED</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="loadProfessors()">&#8635; Refresh</button>
+            </div>
+            <div class="tab-toolbar-group">
+              <button class="btn btn-primary btn-sm" onclick="downloadFilteredProfessors('csv')">&#8681; Download Profs CSV</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadFilteredProfessors('json')">&#8681; Download Profs JSON</button>
+            </div>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <input type="text" id="prof-search" class="form-control" style="width:200px; padding:5px 9px;" placeholder="Search name / topic..." oninput="loadProfessors()" />
-            <select id="prof-email-filter" class="form-control" style="width:160px; padding:5px 9px;" onchange="loadProfessors()">
-              <option value="">All Email Status</option>
-              <option value="FOUND">FOUND</option>
-              <option value="MISSING">MISSING</option>
-              <option value="IMAGE_EMBEDDED">IMAGE_EMBEDDED</option>
-            </select>
-            <button class="btn btn-secondary btn-sm" onclick="loadProfessors()">&#8635; Refresh</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="p12-table-wrap">
-            <table class="p12-table">
+          <div class="saas-scroll-540">
+            <table class="saas-table">
               <thead>
                 <tr>
-                  <th>Professor &amp; Title</th>
+                  <th>Professor (EN / ZH)</th>
+                  <th>Title</th>
                   <th>University &amp; Dept</th>
-                  <th>Degree Eligibility</th>
-                  <th>Research Interests</th>
+                  <th>Degree</th>
+                  <th>Research Areas (EN)</th>
                   <th>Email &amp; Status</th>
-                  <th>Grounding Evidence Quote</th>
                 </tr>
               </thead>
               <tbody id="prof-table-body">
-                <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No professors extracted yet.</td></tr>
+                <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No professors extracted yet.</td></tr>
               </tbody>
             </table>
           </div>
         </div>
-      </section>
 
-      <!-- SECTION 04: Needs Review Queue -->
-      <section id="sec-review" class="enterprise-card page-section mt-4">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">04</span>
-            <span class="indicator-title">NEEDS REVIEW QUEUE (<span id="review-row-count">0</span>)</span>
+        <!-- TAB 3: Needs Review -->
+        <div id="tab-review" class="saas-tab-pane">
+          <div class="tab-toolbar">
+            <div class="tab-toolbar-group">
+              <select id="review-domain-filter" class="form-control form-control-sm" style="width:190px;" onchange="loadNeedsReview()">
+                <option value="">All Domains</option>
+              </select>
+              <select id="review-error-filter" class="form-control form-control-sm" style="width:200px;" onchange="loadNeedsReview()">
+                <option value="">All Error Codes</option>
+                <option value="GROUNDING_FAILED">GROUNDING_FAILED</option>
+                <option value="NEGATED_SUPERVISOR">NEGATED_SUPERVISOR</option>
+                <option value="AGENT_FAILED">AGENT_FAILED</option>
+                <option value="ROBOTS_DISALLOWED">ROBOTS_DISALLOWED</option>
+                <option value="ZERO_VERIFIED_PROFESSORS">ZERO_VERIFIED_PROFESSORS</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="loadNeedsReview()">&#8635; Refresh</button>
+            </div>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="loadNeedsReview()">&#8635; Refresh</button>
-        </div>
-        <div class="card-body">
-          <div class="p12-table-wrap">
-            <table class="p12-table">
+          <div class="saas-scroll-540">
+            <table class="saas-table">
               <thead>
                 <tr>
                   <th>Domain</th>
@@ -264,123 +334,245 @@
                 </tr>
               </thead>
               <tbody id="review-table-body">
-                <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:18px;">No items in needs_review.</td></tr>
+                <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 4: LLM & API Analytics -->
+        <div id="tab-analytics" class="saas-tab-pane">
+          <div class="tab-toolbar">
+            <div class="tab-toolbar-group">
+              <input type="text" id="analytics-job-id" class="form-control form-control-sm" style="width:170px; font-family:var(--font-mono);" placeholder="Filter job_id (blank=all)" />
+              <select id="analytics-provider-filter" class="form-control form-control-sm" style="width:140px;" onchange="loadAnalytics()">
+                <option value="">All Providers</option>
+                <option value="colab_qwen">Colab Qwen</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="gemini">Gemini</option>
+                <option value="serper">Serper</option>
+              </select>
+              <select id="analytics-status-filter" class="form-control form-control-sm" style="width:165px;" onchange="loadAnalytics()">
+                <option value="">All Statuses</option>
+                <option value="ok">ok</option>
+                <option value="tunnel_down_502">tunnel_down_502</option>
+                <option value="rate_limited_429">rate_limited_429</option>
+                <option value="server_error_503">server_error_503</option>
+                <option value="auth_error_401_403">auth_error_401_403</option>
+                <option value="timeout">timeout</option>
+                <option value="connection_error">connection_error</option>
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="loadAnalytics()">&#8635; Refresh Analytics</button>
+            </div>
+          </div>
+
+          <div id="analytics-provider-cards" class="analytics-cards"></div>
+          <div id="analytics-failure-summary" class="failure-box clean">No API breakages detected.</div>
+
+          <div class="saas-scroll-340">
+            <table class="saas-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Provider &amp; Model</th>
+                  <th>Stage / Domain</th>
+                  <th>Status</th>
+                  <th>Latency</th>
+                  <th>Error / Detail</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-traces-body">
+                <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No API traces recorded yet.</td></tr>
               </tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- SECTION 05: Complete Un-Truncated Per-Run Logs Viewer -->
-      <section id="sec-logs" class="enterprise-card page-section mt-4">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">05</span>
-            <span class="indicator-title">FULL RUN LOGS VIEWER (UN-TRUNCATED JSONL)</span>
+      <!-- Collapsible Admin Config & Live Logs Drawer -->
+      <section class="saas-card">
+        <button class="collapsible-bar" onclick="toggleAdminLogsDrawer()">
+          <span>&#9881; Admin Config, 3-Step Diff-Sync &amp; Full Run Logs <span style="font-weight:400; color:var(--text-muted); font-size:12px;">(GET/PATCH /api/v1/admin/config &middot; logs/jobs/*.jsonl)</span></span>
+          <span id="drawer-chevron">&#9660; Expand</span>
+        </button>
+        <div id="admin-logs-drawer" class="saas-card-body hidden" style="border-top:1px solid var(--border-subtle);">
+          <!-- Live Logs Viewer -->
+          <div style="margin-bottom:18px;">
+            <div class="tab-toolbar">
+              <div class="tab-toolbar-group">
+                <strong style="font-size:13px;">Full Run Logs Viewer (Un-Truncated JSONL)</strong>
+                <input type="text" id="log-job-id" class="form-control form-control-sm" style="width:150px; font-family:var(--font-mono);" placeholder="job_id" />
+                <select id="log-level-filter" class="form-control form-control-sm" style="width:110px;" onchange="reloadLogsFromStart()">
+                  <option value="">All Levels</option>
+                  <option value="info">INFO</option>
+                  <option value="warning">WARNING</option>
+                  <option value="error">ERROR</option>
+                </select>
+                <input type="text" id="log-domain-filter" class="form-control form-control-sm" style="width:150px;" placeholder="Filter domain..." oninput="reloadLogsFromStart()" />
+                <label style="font-size:12px; display:inline-flex; align-items:center; gap:4px; cursor:pointer;">
+                  <input type="checkbox" id="log-autoscroll" checked /> Auto-scroll
+                </label>
+              </div>
+              <div class="tab-toolbar-group">
+                <button class="btn btn-secondary btn-sm" onclick="reloadLogsFromStart()">&#8635; Load</button>
+                <button class="btn btn-primary btn-sm" onclick="downloadCurrentJobLogs()">&#8681; Download .jsonl</button>
+              </div>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:6px;">
+              Showing <strong id="log-loaded-count">0</strong> / <strong id="log-total-count">0</strong> lines from <code id="log-file-label">logs/jobs/&lt;job_id&gt;.jsonl</code>
+            </div>
+            <div id="log-viewer-box" class="p12-log-box">
+              <div class="p12-log-line">Start a job above or enter a job_id to inspect full un-truncated JSONL logs...</div>
+            </div>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <input type="text" id="log-job-id" class="form-control" style="width:150px; padding:5px 9px; font-family:var(--font-mono);" placeholder="job_id" />
-            <select id="log-level-filter" class="form-control" style="width:120px; padding:5px 9px;" onchange="reloadLogsFromStart()">
-              <option value="">All Levels</option>
-              <option value="info">INFO</option>
-              <option value="warning">WARNING</option>
-              <option value="error">ERROR</option>
-            </select>
-            <input type="text" id="log-domain-filter" class="form-control" style="width:160px; padding:5px 9px;" placeholder="Filter domain..." oninput="reloadLogsFromStart()" />
-            <label style="font-size:12px; display:inline-flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" id="log-autoscroll" checked /> Auto-scroll
-            </label>
-            <button class="btn btn-secondary btn-sm" onclick="reloadLogsFromStart()">&#8635; Load</button>
-            <button class="btn btn-primary btn-sm" onclick="downloadCurrentJobLogs()">&#8681; Download Full Log</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <div style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">
-            Showing <strong id="log-loaded-count">0</strong> / <strong id="log-total-count">0</strong> total lines from <code id="log-file-label">logs/jobs/&lt;job_id&gt;.jsonl</code>
-          </div>
-          <div id="log-viewer-box" class="p12-log-box">
-            <div class="p12-log-line">Start a job in Section 01 or enter a job_id above to stream all un-truncated run logs...</div>
-          </div>
-        </div>
-      </section>
 
-      <!-- SECTION 06: Admin Guardrails & 3-Step Diff-Sync -->
-      <section id="sec-admin" class="enterprise-card page-section mt-4 mb-5">
-        <div class="card-header">
-          <div class="section-indicator">
-            <span class="indicator-badge">06</span>
-            <span class="indicator-title">ADMIN GUARDRAILS, FEATURE TOGGLES &amp; 3-STEP DIFF-SYNC</span>
-          </div>
-          <span class="status-note">GET/PATCH /api/v1/admin/config &middot; POST /api/v1/admin/sync</span>
-        </div>
-        <div class="card-body">
+          <!-- Admin Guardrails & Diff-Sync -->
           <div class="p12-admin-grid">
-            <!-- Left: AdminConfig Guardrails + Toggles -->
             <div style="background:var(--bg-subtle); padding:14px; border-radius:10px; border:1px solid var(--border-subtle);">
-              <h3 style="font-size:14px; margin-bottom:10px;">Backend Guardrails &amp; Feature Flags</h3>
+              <h3 style="font-size:13.5px; margin-bottom:10px;">Backend Guardrails &amp; Feature Flags</h3>
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
-                <div class="form-group">
-                  <label for="adm-max-depts">Max Departments / Request</label>
-                  <input type="number" id="adm-max-depts" class="form-control" min="1" value="1" />
+                <div class="form-group" style="margin:0;">
+                  <label for="adm-max-depts">Max Depts / Request</label>
+                  <input type="number" id="adm-max-depts" class="form-control form-control-sm" min="1" value="1" />
                 </div>
-                <div class="form-group">
-                  <label for="adm-max-unis">Max Universities / Job</label>
-                  <input type="number" id="adm-max-unis" class="form-control" min="1" value="20" />
+                <div class="form-group" style="margin:0;">
+                  <label for="adm-max-unis">Max Unis / Job</label>
+                  <input type="number" id="adm-max-unis" class="form-control form-control-sm" min="1" value="20" />
                 </div>
-                <div class="form-group">
-                  <label for="adm-max-profs">Max Professors / Uni</label>
-                  <input type="number" id="adm-max-profs" class="form-control" min="1" value="80" />
+                <div class="form-group" style="margin:0;">
+                  <label for="adm-max-profs">Max Profs / Uni</label>
+                  <input type="number" id="adm-max-profs" class="form-control form-control-sm" min="1" value="80" />
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin:0;">
                   <label for="adm-max-concurrent">Max Concurrent Unis</label>
-                  <input type="number" id="adm-max-concurrent" class="form-control" min="1" max="8" value="2" />
+                  <input type="number" id="adm-max-concurrent" class="form-control form-control-sm" min="1" max="8" value="5" />
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin:0; grid-column:span 2;">
                   <label for="adm-countries">Allowed Countries (comma-sep)</label>
-                  <input type="text" id="adm-countries" class="form-control" value="China" />
+                  <input type="text" id="adm-countries" class="form-control form-control-sm" value="China" />
                 </div>
               </div>
 
-              <div class="p12-toggle-row"><span>Enable Serper Search-First (Strategy A)</span><input type="checkbox" id="adm-enable-serper" checked /></div>
-              <div class="p12-toggle-row"><span>Enable Playwright WAF/JS Fallback (Strategy C)</span><input type="checkbox" id="adm-enable-playwright" checked /></div>
-              <div class="p12-toggle-row"><span>Enable Navigation Agent Fallback (Strategy D)</span><input type="checkbox" id="adm-enable-agent" checked /></div>
-              <div class="p12-toggle-row"><span>Enable Colab T4 GPU Bridge</span><input type="checkbox" id="adm-enable-colab" checked /></div>
-              <div class="p12-toggle-row"><span>Enable LLM Structured Extraction (Phase 2B)</span><input type="checkbox" id="adm-enable-llm" checked /></div>
+              <label class="toggle-pill-row enabled" for="adm-enable-serper">
+                <span>Enable Serper Search-First Fallback</span>
+                <span class="toggle-pill-right">
+                  <span class="toggle-check-badge">&#10003; Active</span>
+                  <input type="checkbox" id="adm-enable-serper" checked onchange="syncTogglePill(this)" />
+                </span>
+              </label>
+              <label class="toggle-pill-row enabled" for="adm-enable-playwright">
+                <span>Enable Playwright WAF/JS Fallback</span>
+                <span class="toggle-pill-right">
+                  <span class="toggle-check-badge">&#10003; Active</span>
+                  <input type="checkbox" id="adm-enable-playwright" checked onchange="syncTogglePill(this)" />
+                </span>
+              </label>
+              <label class="toggle-pill-row enabled" for="adm-enable-agent">
+                <span>Enable Navigation Agent Fallback</span>
+                <span class="toggle-pill-right">
+                  <span class="toggle-check-badge">&#10003; Active</span>
+                  <input type="checkbox" id="adm-enable-agent" checked onchange="syncTogglePill(this)" />
+                </span>
+              </label>
+              <label class="toggle-pill-row enabled" for="adm-enable-colab">
+                <span>Enable Colab T4 GPU Bridge (Tier 1)</span>
+                <span class="toggle-pill-right">
+                  <span class="toggle-check-badge">&#10003; Active</span>
+                  <input type="checkbox" id="adm-enable-colab" checked onchange="syncTogglePill(this)" />
+                </span>
+              </label>
+              <label class="toggle-pill-row enabled" for="adm-enable-llm">
+                <span>Enable LLM Structured Extraction (Phase 2B)</span>
+                <span class="toggle-pill-right">
+                  <span class="toggle-check-badge">&#10003; Active</span>
+                  <input type="checkbox" id="adm-enable-llm" checked onchange="syncTogglePill(this)" />
+                </span>
+              </label>
 
-              <button id="btn-save-admin-config" class="btn btn-primary" style="margin-top:8px;" onclick="saveAdminConfig(this)">💾 Save Admin Config</button>
+              <button id="btn-save-admin-config" class="btn btn-primary" style="margin-top:8px;" onclick="saveAdminConfig(this)">&#128190; Save Admin Config</button>
             </div>
 
-            <!-- Right: 3-Step Smart Diff-Sync Trigger -->
             <div style="background:var(--bg-subtle); padding:14px; border-radius:10px; border:1px solid var(--border-subtle);">
-              <h3 style="font-size:14px; margin-bottom:10px;">On-Demand 3-Step Smart Diff-Sync ($0 LLM on Unchanged)</h3>
-              <p style="font-size:12.5px; color:var(--text-secondary); margin-bottom:12px;">
-                Re-validates stored universities using HTTP 304/ETag &rarr; Roster URL Diff (marks vanished professors <code>POSSIBLY_INACTIVE</code>) &rarr; Markdown SHA-256 Diff.
+              <h3 style="font-size:13.5px; margin-bottom:8px;">On-Demand 3-Step Smart Diff-Sync ($0 LLM on Unchanged)</h3>
+              <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+                Re-validates stored universities using HTTP 304/ETag &rarr; Roster URL Diff &rarr; Markdown SHA-256 Diff.
               </p>
-              <div class="form-group" style="margin-bottom:10px;">
+              <div class="form-group" style="margin-bottom:8px;">
                 <label for="sync-domains">Domains (comma-separated)</label>
-                <input type="text" id="sync-domains" class="form-control" placeholder="tsinghua.edu.cn, pku.edu.cn" />
+                <input type="text" id="sync-domains" class="form-control form-control-sm" placeholder="tsinghua.edu.cn, sjtu.edu.cn" />
               </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
-                <div class="form-group">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                <div class="form-group" style="margin:0;">
                   <label for="sync-dept">Department</label>
-                  <input type="text" id="sync-dept" class="form-control" value="Computer Science" />
+                  <input type="text" id="sync-dept" class="form-control form-control-sm" value="Computer Science" />
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="margin:0;">
                   <label for="sync-degree">Degree</label>
-                  <select id="sync-degree" class="form-control">
+                  <select id="sync-degree" class="form-control form-control-sm">
                     <option value="masters">masters</option>
                     <option value="phd">phd</option>
                     <option value="both">both</option>
                   </select>
                 </div>
               </div>
-              <button id="btn-trigger-sync" class="btn btn-success" onclick="triggerAdminDiffSync(this)">&#8635; Run 3-Step Smart Diff-Sync</button>
-              <pre id="sync-result-output" style="margin-top:12px; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:8px; font-size:11.5px; max-height:190px; overflow:auto;">Ready.</pre>
+              <button id="btn-trigger-sync" class="btn btn-success btn-sm" onclick="triggerAdminDiffSync(this)">&#8635; Run 3-Step Smart Diff-Sync</button>
+              <pre id="sync-result-output" class="saas-code-pre" style="margin-top:10px; max-height:170px;">Ready.</pre>
             </div>
           </div>
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Tree Viewer Drawer Modal -->
+  <div id="tree-modal-backdrop" class="saas-modal-backdrop hidden" onclick="if(event.target===this) closeTreeModal()">
+    <div class="saas-modal">
+      <div class="saas-modal-hdr">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <strong id="site-tree-title">Site Tree</strong>
+          <span id="site-tree-nav-badge" class="p12-badge p12-badge-muted"></span>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="closeTreeModal()">&times; Close</button>
+      </div>
+      <div class="saas-modal-body">
+        <div class="saas-split">
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Markdown Site Tree</div>
+            <pre id="site-tree-md" class="saas-code-pre"></pre>
+          </div>
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Departments Map &amp; Verified Rosters</div>
+            <pre id="site-tree-depts" class="saas-code-pre"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Call Trace Detail Modal (Side-by-Side Sent Request vs Raw Response) -->
+  <div id="trace-modal-backdrop" class="saas-modal-backdrop hidden" onclick="if(event.target===this) closeTraceModal()">
+    <div class="saas-modal">
+      <div class="saas-modal-hdr">
+        <div>
+          <strong id="trace-modal-title">API Call Trace</strong>
+          <div id="trace-modal-meta" style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;"></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="closeTraceModal()">&times; Close</button>
+      </div>
+      <div class="saas-modal-body">
+        <div id="trace-modal-error" class="provider-err-box hidden" style="margin-bottom:10px;"></div>
+        <div class="saas-split">
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Sent Request Payload</div>
+            <pre id="trace-modal-req" class="saas-code-pre"></pre>
+          </div>
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Raw Response Payload</div>
+            <pre id="trace-modal-res" class="saas-code-pre"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="p12-toast" class="p12-toast hidden"></div>

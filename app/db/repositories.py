@@ -4,6 +4,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.schemas.entities import (
+    ApiCallTraceDoc,
     JobDoc,
     NeedsReviewDoc,
     PageSnapshotDoc,
@@ -197,6 +198,118 @@ class Repository:
             out.append(UniversitySiteTreeDoc(**doc))
         return out
 
+    # ------------------------------------------------------------------ api_call_traces
+    async def insert_api_call_trace(self, trace: ApiCallTraceDoc) -> None:
+        doc = trace.model_dump()
+        doc["request_payload"] = (doc.get("request_payload") or "")[:8000]
+        doc["response_payload"] = (doc.get("response_payload") or "")[:8000]
+        await self.db["api_call_traces"].update_one(
+            {"trace_id": trace.trace_id},
+            {"$set": doc},
+            upsert=True,
+        )
+
+    async def list_api_call_traces(
+        self,
+        *,
+        job_id: str | None = None,
+        provider: str | None = None,
+        status: str | None = None,
+        limit: int = 60,
+    ) -> list[ApiCallTraceDoc]:
+        query: dict[str, Any] = {}
+        if job_id:
+            query["job_id"] = job_id.strip()
+        if provider:
+            query["provider"] = provider.strip().lower()
+        if status:
+            query["status"] = status.strip()
+        cursor = self.db["api_call_traces"].find(query).sort("created_at", -1).limit(limit)
+        out: list[ApiCallTraceDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(ApiCallTraceDoc(**doc))
+        return out
+
+    async def get_api_call_trace(self, trace_id: str) -> ApiCallTraceDoc | None:
+        doc = await self.db["api_call_traces"].find_one({"trace_id": trace_id})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return ApiCallTraceDoc(**doc)
+
+    async def get_api_analytics_overview(self, *, job_id: str | None = None) -> dict[str, Any]:
+        query: dict[str, Any] = {}
+        if job_id:
+            query["job_id"] = job_id.strip()
+
+        providers_init = {
+            p: {
+                "provider": p,
+                "total_calls": 0,
+                "ok_count": 0,
+                "failed_count": 0,
+                "avg_latency_ms": 0.0,
+                "max_latency_ms": 0,
+                "last_error": None,
+                "_lat_sum": 0,
+            }
+            for p in ("colab_qwen", "deepseek", "gemini", "serper")
+        }
+        failure_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+        cursor = self.db["api_call_traces"].find(query).sort("created_at", -1)
+        async for doc in cursor:
+            prov = str(doc.get("provider") or "unknown").lower()
+            if prov not in providers_init:
+                providers_init[prov] = {
+                    "provider": prov,
+                    "total_calls": 0,
+                    "ok_count": 0,
+                    "failed_count": 0,
+                    "avg_latency_ms": 0.0,
+                    "max_latency_ms": 0,
+                    "last_error": None,
+                    "_lat_sum": 0,
+                }
+            bucket = providers_init[prov]
+            st = str(doc.get("status") or "ok")
+            lat = int(doc.get("latency_ms") or 0)
+            err = str(doc.get("error_detail") or "")
+            bucket["total_calls"] += 1
+            bucket["_lat_sum"] += lat
+            if lat > bucket["max_latency_ms"]:
+                bucket["max_latency_ms"] = lat
+            if st == "ok":
+                bucket["ok_count"] += 1
+            else:
+                bucket["failed_count"] += 1
+                if bucket["last_error"] is None:
+                    bucket["last_error"] = {"status": st, "http_status": doc.get("http_status"), "detail": err[:240]}
+                gk = (prov, st, err[:160])
+                if gk not in failure_groups:
+                    failure_groups[gk] = {
+                        "provider": prov,
+                        "status": st,
+                        "error_detail": err[:160],
+                        "count": 0,
+                    }
+                failure_groups[gk]["count"] += 1
+
+        providers_out: dict[str, Any] = {}
+        for prov, b in providers_init.items():
+            total = b["total_calls"]
+            b["avg_latency_ms"] = round(b["_lat_sum"] / total, 1) if total else 0.0
+            b.pop("_lat_sum", None)
+            providers_out[prov] = b
+
+        failures_sorted = sorted(failure_groups.values(), key=lambda x: x["count"], reverse=True)
+        return {
+            "job_id": job_id,
+            "providers": providers_out,
+            "failure_breakdown": failures_sorted,
+        }
+
     async def get_system_summary(self) -> dict[str, int]:
         return {
             "universities": await self.db["universities_seed"].count_documents({}),
@@ -204,4 +317,6 @@ class Repository:
             "page_snapshots": await self.db["page_snapshots"].count_documents({}),
             "professors": await self.db["professors"].count_documents({}),
             "needs_review": await self.db["needs_review"].count_documents({}),
+            "site_trees": await self.db["university_site_trees"].count_documents({}),
+            "api_call_traces": await self.db["api_call_traces"].count_documents({}),
         }

@@ -25,7 +25,7 @@ class AppSettings(BaseSettings):
 
     BACKUP_LLM_BASE_URL: str = Field(default="https://coarena.ai/api/v1")
     BACKUP_LLM_API_KEY: str = Field(default="")
-    BACKUP_LLM_MODEL: str = Field(default="gemini-3-8-flash")
+    BACKUP_LLM_MODEL: str = Field(default="gemini-3-flash-preview,gemini-2.5-flash")
 
     # Search-first provider
     SERPER_API_KEY: str = Field(default="")
