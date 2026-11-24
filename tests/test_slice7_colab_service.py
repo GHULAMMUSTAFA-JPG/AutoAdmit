@@ -1,148 +1,81 @@
-"""Slice 7 Tests: Standalone Colab GPU Model Server (X-API-Key auth, /health, /score-links, /html-to-md)."""
+"""Slice 7 Tests: Standalone Colab T4 4-bit Qwen2.5-7B-Instruct OpenAI-compatible Server + E2E LLMRouter ASGI check."""
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from colab_service.colab_server import ModelRegistry, create_colab_app
+from app.core.llm_router import COLAB_QWEN_MODEL, LLMEndpoint, LLMRouter
+from colab_service.colab_server import QwenModelRegistry, create_colab_app
 
 
-class _FakeEncoder:
-    def encode(self, texts, normalize_embeddings=True):
-        out = []
-        for t in texts:
-            if "师资" in t or "supervisor" in t.lower():
-                out.append([1.0, 0.0])
-            else:
-                out.append([0.0, 1.0])
-        return out
-
-
-def _make_mocked_app():
-    reg = ModelRegistry()
+def _make_mocked_qwen_app(api_key: str = "super-secret-key"):
+    reg = QwenModelRegistry()
     reg.device = "Tesla T4 (Mock)"
-    reg.vram_used_mb = 5900.0
-    reg.models["minilm"] = _FakeEncoder()
-    reg.models["bge-m3"] = _FakeEncoder()
-    reg.models["readerlm-v2"] = lambda html: "# 张伟\n博士生导师"
-    return create_colab_app(registry=reg, api_key="super-secret-key")
+    reg.vram_allocated_mb = 5520.0
+    reg.vram_total_mb = 15360.0
+    reg.generate_fn = lambda msgs, temp, max_tok: '{"ok": true, "model": "qwen2.5-7b"}'
+    return create_colab_app(registry=reg, api_key=api_key)
 
 
-def test_colab_server_rejects_missing_or_invalid_api_key():
-    client = TestClient(_make_mocked_app())
+def test_colab_qwen_rejects_missing_invalid_and_unset_api_key():
+    client = TestClient(_make_mocked_qwen_app())
+    assert client.get("/health").status_code == 401
+    assert client.get("/health", headers={"X-API-Key": "wrong"}).status_code == 401
 
-    r_missing = client.get("/health")
-    assert r_missing.status_code == 401
+    # Fail closed when COLAB_API_KEY is empty
+    closed_client = TestClient(_make_mocked_qwen_app(api_key=""))
+    assert closed_client.get("/health", headers={"X-API-Key": ""}).status_code == 401
+    assert closed_client.get("/health", headers={"X-API-Key": "any"}).status_code == 401
 
-    r_wrong = client.get("/health", headers={"X-API-Key": "wrong-key"})
-    assert r_wrong.status_code == 401
 
-
-def test_colab_server_health_score_links_and_html_to_md():
-    client = TestClient(_make_mocked_app())
+def test_colab_qwen_health_chat_completions_and_oom_limits():
+    client = TestClient(_make_mocked_qwen_app())
     headers = {"X-API-Key": "super-secret-key"}
 
-    # 1. /health
     rh = client.get("/health", headers=headers)
     assert rh.status_code == 200
     h = rh.json()
     assert h["gpu_device"] == "Tesla T4 (Mock)"
-    assert set(h["loaded_models"]) == {"bge-m3", "minilm", "readerlm-v2"}
+    assert h["model"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert h["vram_allocated_mb"] == 5520.0
 
-    # 2. /score-links (minilm & bge-m3)
-    payload = {
-        "query": "Computer Science supervisor 师资",
-        "links": [
-            {"text": "新闻动态", "href": "https://cs.u.edu.cn/news"},
-            {"text": "师资队伍", "href": "https://cs.u.edu.cn/szdw"},
-        ],
-        "top_k": 2,
-    }
-    for mdl in ("minilm", "bge-m3"):
-        rs = client.post("/score-links", headers=headers, json={**payload, "model": mdl})
-        assert rs.status_code == 200
-        d = rs.json()
-        assert d["model"] == mdl
-        assert d["results"][0]["href"] == "https://cs.u.edu.cn/szdw"
-        assert d["results"][0]["score"] > d["results"][1]["score"]
-        assert "latency_ms" in d
+    rc = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "messages": [{"role": "user", "content": "Extract JSON"}],
+            "temperature": 0.0,
+            "max_tokens": 128,
+            "response_format": {"type": "json_object"},
+        },
+    )
+    assert rc.status_code == 200
+    body = rc.json()
+    assert body["model"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert '"qwen2.5-7b"' in body["choices"][0]["message"]["content"]
 
-    # 3. /html-to-md
-    rm = client.post("/html-to-md", headers=headers, json={"html": "<h1>张伟</h1><p>博士生导师</p>"})
-    assert rm.status_code == 200
-    md_body = rm.json()
-    assert "张伟" in md_body["markdown"]
-    assert "latency_ms" in md_body
-
-
-def test_colab_server_fails_closed_when_api_key_unset_and_enforces_oom_limits():
-    # Fail closed when COLAB_API_KEY is empty
-    reg = ModelRegistry()
-    reg.models["minilm"] = _FakeEncoder()
-    reg.models["readerlm-v2"] = lambda html: "ok"
-    app_closed = create_colab_app(registry=reg, api_key="")
-    c_closed = TestClient(app_closed)
-    assert c_closed.get("/health", headers={"X-API-Key": ""}).status_code == 401
-    assert c_closed.get("/health", headers={"X-API-Key": "anything"}).status_code == 401
-
-    # OOM protection: oversized HTML (>200k chars) and >200 links rejected with 413
-    c_ok = TestClient(_make_mocked_app())
-    headers = {"X-API-Key": "super-secret-key"}
-    r_big_html = c_ok.post("/html-to-md", headers=headers, json={"html": "x" * 200_005})
-    assert r_big_html.status_code == 413
-
-    many_links = [{"text": f"L{i}", "href": f"https://u.edu.cn/{i}"} for i in range(205)]
-    r_big_links = c_ok.post("/score-links", headers=headers, json={"query": "CS", "links": many_links, "model": "minilm"})
-    assert r_big_links.status_code == 413
+    # OOM limit (>60,000 chars) returns 413
+    r_big = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={"messages": [{"role": "user", "content": "x" * 60_005}]},
+    )
+    assert r_big.status_code == 413
 
 
 @pytest.mark.asyncio
-async def test_e2e_colab_client_directly_against_colab_server_asgi():
-    """End-to-end HTTP test connecting app/services/colab_client.py directly to colab_service/colab_server.py."""
-    import httpx
-    from app.services.colab_client import ColabClient
-
-    colab_app = _make_mocked_app()
+async def test_e2e_llm_router_tier1_directly_against_colab_qwen_asgi():
+    colab_app = _make_mocked_qwen_app(api_key="colab-key-1")
     transport = httpx.ASGITransport(app=colab_app)
 
-    # 1. Wrong API key -> 401 -> ColabClient degrades cleanly with fallback=True
-    bad_client = ColabClient(base_url="http://colab.local", api_key="wrong-key")
-    bad_res = await bad_client.health(transport=transport)
-    assert bad_res.ok is False
-    assert bad_res.data["fallback"] is True
-
-    # 2. Valid API key -> full schema parity across /health, /score-links (single+batch), /html-to-md (single+batch)
-    good_client = ColabClient(base_url="http://colab.local", api_key="super-secret-key")
-
-    h_res = await good_client.health(transport=transport)
-    assert h_res.ok is True
-    assert h_res.data["gpu_device"] == "Tesla T4 (Mock)"
-
-    s_res = await good_client.score_links(
-        "CS supervisor 师资",
-        [
-            {"text": "新闻", "href": "https://u.edu.cn/news"},
-            {"text": "师资队伍", "href": "https://u.edu.cn/szdw"},
-        ],
-        model="bge-m3",
-        top_k=2,
-        transport=transport,
+    router = LLMRouter(
+        colab=LLMEndpoint("colab_qwen", "http://colab.local/v1", "colab-key-1", COLAB_QWEN_MODEL, tier=1, auth_header="X-API-Key", timeout_sec=30.0),
+        primary=LLMEndpoint("primary", "", "", "", tier=2),
+        backup=LLMEndpoint("backup", "", "", "", tier=3),
     )
-    assert s_res.ok is True
-    assert s_res.data["results"][0]["href"] == "https://u.edu.cn/szdw"
-
-    sb_res = await good_client.score_links_batch(
-        [{"query": "师资", "links": [{"text": "师资队伍", "href": "https://u.edu.cn/szdw"}]}],
-        model="minilm",
-        top_k=1,
-        transport=transport,
-    )
-    assert sb_res.ok is True
-    assert len(sb_res.data["batch_results"]) == 1
-
-    m_res = await good_client.html_to_markdown("<h1>张伟</h1>", transport=transport)
-    assert m_res.ok is True
-    assert "张伟" in m_res.data["markdown"]
-
-    mb_res = await good_client.html_to_markdown_batch(["<h1>A</h1>", "<h1>B</h1>"], transport=transport)
-    assert mb_res.ok is True
-    assert len(mb_res.data["markdowns"]) == 2
+    res = await router.complete([{"role": "user", "content": "hi"}], json_mode=True, transport=transport)
+    assert res.ok is True
+    assert res.data["tier"] == 1
+    assert res.data["provider"] == "colab_qwen"
+    assert '"qwen2.5-7b"' in res.data["content"]

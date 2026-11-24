@@ -10,6 +10,7 @@ from app.schemas.entities import (
     ProfessorDoc,
     UniversityDeptDoc,
     UniversitySeed,
+    UniversitySiteTreeDoc,
     utc_now,
 )
 
@@ -141,6 +142,60 @@ class Repository:
 
     async def add_needs_review(self, item: NeedsReviewDoc) -> None:
         await self.db["needs_review"].insert_one(item.model_dump())
+
+    async def list_needs_review(
+        self,
+        domain: str | None = None,
+        stage: str | None = None,
+        limit: int = 200,
+    ) -> list[NeedsReviewDoc]:
+        query: dict[str, Any] = {}
+        if domain:
+            query["domain"] = domain.lower().strip()
+        if stage:
+            query["stage"] = stage.strip()
+        cursor = self.db["needs_review"].find(query).sort("created_at", -1).limit(limit)
+        out: list[NeedsReviewDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(NeedsReviewDoc(**doc))
+        return out
+
+    async def list_department_docs(self, domains: list[str] | None = None) -> list[UniversityDeptDoc]:
+        query: dict[str, Any] = {}
+        if domains:
+            query["domain"] = {"$in": domains}
+        cursor = self.db["university_departments"].find(query)
+        out: list[UniversityDeptDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(UniversityDeptDoc(**doc))
+        return out
+
+    # ------------------------------------------------------------------ university_site_trees
+    async def get_site_tree(self, domain: str) -> UniversitySiteTreeDoc | None:
+        doc = await self.db["university_site_trees"].find_one({"domain": domain.lower().strip()})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return UniversitySiteTreeDoc(**doc)
+
+    async def upsert_site_tree(self, tree: UniversitySiteTreeDoc) -> None:
+        tree.domain = tree.domain.lower().strip()
+        tree.updated_at = utc_now()
+        await self.db["university_site_trees"].update_one(
+            {"domain": tree.domain},
+            {"$set": tree.model_dump()},
+            upsert=True,
+        )
+
+    async def list_site_trees(self, limit: int = 200) -> list[UniversitySiteTreeDoc]:
+        cursor = self.db["university_site_trees"].find({}).sort("updated_at", -1).limit(limit)
+        out: list[UniversitySiteTreeDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(UniversitySiteTreeDoc(**doc))
+        return out
 
     async def get_system_summary(self) -> dict[str, int]:
         return {

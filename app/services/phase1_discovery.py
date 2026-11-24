@@ -250,7 +250,15 @@ class Phase1DiscoveryService:
         return StepResult.fail(ErrorCode.VERIFICATION_FAILED, "Direct crawl could not verify a faculty roster page.")
 
     async def discover(self, domain: str, department: str, degree: str) -> StepResult:
-        """Executes full Phase 1 discovery for (domain, department, degree) and persists permanently."""
+        """
+        Tree-First Phase 1 Discovery:
+        1. Permanent DB Check (university_departments COMPLETE -> $0).
+        2. Tree-First Engine (SiteTreeBuilder: Tree Cache -> Pruned BFS/DFS -> Serper+LLM Selector + >=3 profile Gate).
+        3. Last-Resort Navigation Agent (Strategy D) if Tree-First fails and enable_agent_fallback=True.
+        """
+        from app.services.site_tree_builder import SiteTreeBuilder
+        from app.services.phase2_scraper import verify_roster_html
+
         clean_domain = domain.lower().strip()
 
         # 0. Permanent DB Check ($0, 0 HTTP calls)
@@ -259,68 +267,58 @@ class Phase1DiscoveryService:
             logger.info("phase1_db_hit", domain=clean_domain, department=department, degree=degree)
             return StepResult.success(existing)
 
-        async with httpx.AsyncClient(transport=self.transport) as client:
-            # Strategy A: Search-First (Serper)
-            res_a = await self._strategy_a_serper(client, clean_domain, department, degree)
-            if res_a.ok:
+        # 1. Tree-First Discovery (Tree Cache -> Pruned BFS/DFS -> Serper+LLM Selector -> >=3 profile Gate)
+        tree_builder = SiteTreeBuilder(
+            self.repo,
+            admin=self.admin,
+            transport=self.transport,
+            playwright_fetcher=self.playwright_fetcher,
+        )
+        tree_res = await tree_builder.build_and_find_roster(clean_domain, department, degree)
+        if tree_res.ok:
+            data = tree_res.data
+            doc = UniversityDeptDoc(
+                domain=clean_domain,
+                department=department,
+                degree=degree,  # type: ignore[arg-type]
+                department_url=data.get("department_url") or data["roster_url"],
+                faculty_roster_url=data["roster_url"],
+                parent_url=f"https://www.{clean_domain}",
+                winning_strategy=data.get("strategy", "TREE_DFS"),
+                navigation_path=[{"strategy": data.get("strategy"), "hops": data.get("hops", 0), "profiles": data.get("candidate_profile_count", 0)}],
+                status="COMPLETE",
+            )
+            await self.repo.upsert_department_doc(doc)
+            return StepResult.success(doc)
+
+        # Never bypass robots.txt — route straight to needs_review
+        if tree_res.error_code == ErrorCode.ROBOTS_DISALLOWED.value:
+            await self._record_failure(clean_domain, department, degree, tree_res.error_code, tree_res.detail or "")
+            return tree_res
+
+        # 2. Strategy D: Last-Resort Navigation Agent (only when enable_agent_fallback=True)
+        if self.admin.enable_agent_fallback:
+            res_d = await self.nav_agent.navigate(f"https://www.{clean_domain}", clean_domain, department, degree)
+            if res_d.ok:
+                cand_url = res_d.data["faculty_roster_url"]
                 doc = UniversityDeptDoc(
                     domain=clean_domain,
                     department=department,
                     degree=degree,  # type: ignore[arg-type]
-                    department_url=res_a.data["department_url"],
-                    faculty_roster_url=res_a.data["faculty_roster_url"],
-                    parent_url=res_a.data["parent_url"],
-                    winning_strategy="SEARCH_FIRST",
-                    navigation_path=res_a.data["navigation_path"],
+                    department_url=cand_url,
+                    faculty_roster_url=cand_url,
+                    parent_url=f"https://www.{clean_domain}",
+                    winning_strategy="NAV_AGENT",
+                    navigation_path=res_d.data.get("navigation_path", []),
                     status="COMPLETE",
                 )
                 await self.repo.upsert_department_doc(doc)
                 return StepResult.success(doc)
-
-            # Strategy B + C: Direct Crawl + Link Scoring (+ Playwright WAF/JS fallback)
-            res_bc = await self._strategy_b_and_c_direct(client, clean_domain, department, degree)
-            if res_bc.ok:
-                doc = UniversityDeptDoc(
-                    domain=clean_domain,
-                    department=department,
-                    degree=degree,  # type: ignore[arg-type]
-                    department_url=res_bc.data["department_url"],
-                    faculty_roster_url=res_bc.data["faculty_roster_url"],
-                    parent_url=res_bc.data["parent_url"],
-                    winning_strategy=res_bc.data["winning_strategy"],
-                    navigation_path=res_bc.data["navigation_path"],
-                    status="COMPLETE",
-                )
-                await self.repo.upsert_department_doc(doc)
-                return StepResult.success(doc)
-
-            # Never bypass robots.txt — route straight to needs_review
-            if res_bc.error_code == ErrorCode.ROBOTS_DISALLOWED.value:
-                await self._record_failure(clean_domain, department, degree, res_bc.error_code, res_bc.detail or "")
-                return res_bc
-
-            # Strategy D: Last-Resort Navigation Agent
-            if self.admin.enable_agent_fallback:
-                res_d = await self.nav_agent.navigate(f"https://www.{clean_domain}", clean_domain, department, degree)
-                if res_d.ok:
-                    doc = UniversityDeptDoc(
-                        domain=clean_domain,
-                        department=department,
-                        degree=degree,  # type: ignore[arg-type]
-                        department_url=res_d.data["faculty_roster_url"],
-                        faculty_roster_url=res_d.data["faculty_roster_url"],
-                        parent_url=f"https://www.{clean_domain}",
-                        winning_strategy="NAV_AGENT",
-                        navigation_path=res_d.data.get("navigation_path", []),
-                        status="COMPLETE",
-                    )
-                    await self.repo.upsert_department_doc(doc)
-                    return StepResult.success(doc)
-                err_code = res_d.error_code or ErrorCode.AGENT_FAILED.value
-                detail = res_d.detail or "Navigation agent failed."
-            else:
-                err_code = res_bc.error_code or ErrorCode.VERIFICATION_FAILED.value
-                detail = f"Strategies A/B/C failed and enable_agent_fallback=False ({res_bc.detail})"
+            err_code = res_d.error_code or ErrorCode.AGENT_FAILED.value
+            detail = res_d.detail or "Navigation agent failed."
+        else:
+            err_code = tree_res.error_code or ErrorCode.VERIFICATION_FAILED.value
+            detail = f"Tree-First discovery failed and enable_agent_fallback=False ({tree_res.detail})"
 
         await self._record_failure(clean_domain, department, degree, err_code, detail)
         return StepResult.fail(err_code, detail)

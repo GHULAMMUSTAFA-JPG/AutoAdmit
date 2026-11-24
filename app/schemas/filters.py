@@ -21,6 +21,7 @@ class AdminConfig(BaseModel):
     max_departments_per_request: int = Field(default=1, ge=1)
     max_universities_per_job: int = Field(default=20, ge=1)
     max_professors_per_uni: int = Field(default=80, ge=1)
+    max_concurrent_universities: int = Field(default=2, ge=1, le=8)
     allowed_countries: list[str] = Field(default_factory=lambda: ["China"])
     enable_serper: bool = Field(default=True)
     enable_playwright: bool = Field(default=True)

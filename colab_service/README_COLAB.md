@@ -1,8 +1,8 @@
-# Google Colab Pro T4 GPU Model Server (3-Cell Quickstart)
+# Google Colab T4 GPU — 4-bit Qwen2.5-7B-Instruct Server (3-Cell Quickstart)
 
-Designed for a standard **Colab T4 GPU (15 GB VRAM / 12.7 GB System RAM)** — no High-RAM runtime required.
+Runs **`Qwen/Qwen2.5-7B-Instruct`** in 4-bit NF4 (`bitsandbytes`, `torch.float16` compute) using **~5.5 GB VRAM** on a standard **Colab T4 GPU (15 GB VRAM)** — zero 429 rate limits and native Chinese academic understanding.
 
-### Cell 1 — Clone Repo & Install Dependencies
+### Cell 1 — Clone/Pull `p12` & Install Dependencies
 ```bash
 !git clone -b p12 https://github.com/GHULAMMUSTAFA-JPG/AutoAdmit.git
 %cd AutoAdmit
@@ -10,19 +10,15 @@ Designed for a standard **Colab T4 GPU (15 GB VRAM / 12.7 GB System RAM)** — n
 !wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared-linux-amd64.deb
 ```
 
-### Cell 2 — Set Your Shared Secret Key
+### Cell 2 — Set Your Shared `COLAB_API_KEY` (Must Match Oracle `.env`)
 ```python
 import os
-os.environ["COLAB_API_KEY"] = "your_strong_shared_secret_here"
+os.environ["COLAB_API_KEY"] = "your_exact_colab_api_key_from_oracle_env"
 ```
 
-### Cell 3 — Launch GPU Server & Cloudflare HTTPS Tunnel
+### Cell 3 — Launch 4-bit Qwen2.5-7B Server & Cloudflare HTTPS Tunnel
 ```bash
 !bash colab_service/run_colab.sh
 ```
 
-Copy the printed `https://<random>.trycloudflare.com` URL into your Oracle VPS `.env`:
-```env
-COLAB_BASE_URL=https://<random>.trycloudflare.com
-COLAB_API_KEY=your_strong_shared_secret_here
-```
+Copy the printed `https://<random>.trycloudflare.com` URL into `COLAB_BASE_URL` in your Oracle VPS `.env` and restart `autoadmit.service`.

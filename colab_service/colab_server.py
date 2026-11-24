@@ -1,145 +1,133 @@
-"""Standalone Google Colab T4 GPU FastAPI Model Server (MiniLM, bge-m3, ReaderLM-v2) with X-API-Key auth."""
+"""Standalone Google Colab T4 GPU OpenAI-Compatible Server for 4-bit NF4 Qwen/Qwen2.5-7B-Instruct (~5.5 GB VRAM)."""
 
 import gc
 import hmac
 import os
 import time
-from typing import Any, Literal
+import uuid
+from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# OOM protection limits for standard Colab T4 (15 GB VRAM / 12.7 GB System RAM)
-MAX_LINKS_PER_REQ = 200
-MAX_BATCH_SIZE = 16
-MAX_HTML_CHARS = 200_000
+MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+MAX_MESSAGES = 32
+MAX_TOTAL_CHARS = 60_000
+MAX_NEW_TOKENS_CAP = 1024
 
 
-class LinkItem(BaseModel):
-    text: str
-    href: str
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
 
-class ScoreLinksRequest(BaseModel):
-    query: str | None = None
-    links: list[LinkItem] | None = None
-    batch: list[dict[str, Any]] | None = None
-    model: Literal["minilm", "bge-m3"] = "minilm"
-    top_k: int = Field(default=3, ge=1, le=20)
+class ChatCompletionRequest(BaseModel):
+    model: str = MODEL_ID
+    messages: list[ChatMessage]
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=512, ge=1, le=MAX_NEW_TOKENS_CAP)
+    response_format: dict[str, Any] | None = None
 
 
-class HtmlToMdRequest(BaseModel):
-    html: str | None = None
-    htmls: list[str] | None = None
-
-
-class ModelRegistry:
-    """Manages sequential GPU model loading (float16) to stay safely inside Colab T4 VRAM & RAM limits."""
+class QwenModelRegistry:
+    """Loads Qwen/Qwen2.5-7B-Instruct in 4-bit NF4 quantization onto Colab T4 GPU (~5.5 GB VRAM)."""
 
     def __init__(self) -> None:
-        self.models: dict[str, Any] = {}
+        self.model_id: str = MODEL_ID
+        self.tokenizer: Any = None
+        self.model: Any = None
+        self.generate_fn: Any = None  # Injectable callable for offline CPU pytest
         self.device: str = "cpu"
-        self.vram_used_mb: float = 0.0
+        self.vram_allocated_mb: float = 0.0
+        self.vram_total_mb: float = 0.0
 
-    def load_all_sequentially(self) -> None:
-        """Loads MiniLM, bge-m3, and ReaderLM-v2 one-by-one onto CUDA float16 with gc + CUDA cache cleanup."""
+    def load_qwen_4bit(self) -> None:
+        """Loads Qwen/Qwen2.5-7B-Instruct in 4-bit NF4 (float16 compute) cleanly inside Colab T4 15GB VRAM."""
         import torch
-        from sentence_transformers import SentenceTransformer
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         use_cuda = torch.cuda.is_available()
         self.device = torch.cuda.get_device_name(0) if use_cuda else "cpu"
-        target_dev = "cuda" if use_cuda else "cpu"
-        dtype = torch.float16 if use_cuda else torch.float32
-        st_kwargs = {"torch_dtype": dtype} if use_cuda else {}
 
-        # 1. MiniLM (~0.5 GB VRAM in fp16)
-        self.models["minilm"] = SentenceTransformer(
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-            device=target_dev,
-            model_kwargs=st_kwargs,
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
         )
-        gc.collect()
-        if use_cuda:
-            torch.cuda.empty_cache()
 
-        # 2. bge-m3 (~2.2 GB VRAM in fp16)
-        self.models["bge-m3"] = SentenceTransformer(
-            "BAAI/bge-m3",
-            device=target_dev,
-            model_kwargs=st_kwargs,
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            quantization_config=bnb_config if use_cuda else None,
+            device_map="auto" if use_cuda else None,
+            torch_dtype=torch.float16 if use_cuda else torch.float32,
         )
+        self.model.eval()
         gc.collect()
         if use_cuda:
             torch.cuda.empty_cache()
+            self.vram_allocated_mb = round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
+            self.vram_total_mb = round(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024), 1)
 
-        # 3. ReaderLM-v2 (~3.2 GB VRAM in fp16)
-        tok = AutoTokenizer.from_pretrained("jinaai/ReaderLM-v2")
-        mdl = AutoModelForCausalLM.from_pretrained("jinaai/ReaderLM-v2", torch_dtype=dtype).to(target_dev)
-        mdl.eval()
-        self.models["readerlm-v2"] = (tok, mdl)
-        gc.collect()
-        if use_cuda:
-            torch.cuda.empty_cache()
-            self.vram_used_mb = round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
-
-    def score_links(self, query: str, links: list[LinkItem], model_key: str, top_k: int) -> list[dict[str, Any]]:
-        if len(links) > MAX_LINKS_PER_REQ:
+    def chat_complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        json_mode: bool = False,
+    ) -> str:
+        if len(messages) > MAX_MESSAGES:
+            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Too many messages.")
+        total_chars = sum(len(m.content) for m in messages)
+        if total_chars > MAX_TOTAL_CHARS:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"Too many links ({len(links)}). Maximum allowed per request is {MAX_LINKS_PER_REQ}.",
+                detail=f"Prompt too large ({total_chars} chars). Max allowed is {MAX_TOTAL_CHARS}.",
             )
-        encoder = self.models.get(model_key)
-        if encoder is None:
-            raise HTTPException(status_code=503, detail=f"Model '{model_key}' is not loaded.")
-        texts = [f"{l.text} {l.href}" for l in links]
-        if not texts:
-            return []
 
-        q_vec = encoder.encode([query], normalize_embeddings=True)[0]
-        l_vecs = encoder.encode(texts, normalize_embeddings=True)
-        scored = []
-        for item, vec in zip(links, l_vecs):
-            score = float(sum(float(a) * float(b) for a, b in zip(q_vec, vec)))
-            scored.append({"text": item.text, "href": item.href, "score": round(score, 4)})
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_k]
+        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+        if json_mode:
+            msg_dicts.insert(0, {"role": "system", "content": "Respond ONLY with valid JSON. No markdown fences or extra prose."})
 
-    def html_to_markdown(self, html: str) -> str:
-        if len(html) > MAX_HTML_CHARS:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"HTML payload too large ({len(html)} chars). Max allowed is {MAX_HTML_CHARS}.",
-            )
-        entry = self.models.get("readerlm-v2")
-        if entry is None:
-            raise HTTPException(status_code=503, detail="Model 'readerlm-v2' is not loaded.")
-        if callable(entry):
-            return str(entry(html))
+        if self.generate_fn is not None:
+            return str(self.generate_fn(msg_dicts, temperature, max_tokens))
+
+        if self.model is None or self.tokenizer is None:
+            raise HTTPException(status_code=503, detail=f"Model '{self.model_id}' is not loaded.")
+
         import torch
-        tok, mdl = entry
-        inputs = tok(html[:12000], return_tensors="pt").to(mdl.device)
+        prompt_text = self.tokenizer.apply_chat_template(msg_dicts, tokenize=False, add_generation_prompt=True)
+        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.model.device)
+        do_sample = temperature > 0.0
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": min(max_tokens, MAX_NEW_TOKENS_CAP),
+            "do_sample": do_sample,
+        }
+        if do_sample:
+            gen_kwargs["temperature"] = temperature
+
         with torch.no_grad():
-            out = mdl.generate(**inputs, max_new_tokens=2048, do_sample=False)
-        decoded = tok.decode(out[0], skip_special_tokens=True)
+            output_ids = self.model.generate(**inputs, **gen_kwargs)
+        new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
+        text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        return decoded
+        return text
 
 
-def create_colab_app(registry: ModelRegistry | None = None, api_key: str | None = None) -> FastAPI:
-    reg = registry or ModelRegistry()
-    # Explicitly preserve "" when passed so tests can verify fail-closed behavior
+def create_colab_app(registry: QwenModelRegistry | None = None, api_key: str | None = None) -> FastAPI:
+    reg = registry or QwenModelRegistry()
     fixed_key = api_key
 
-    app = FastAPI(title="AutoAdmit Colab GPU Model Server", version="1.0.0")
+    app = FastAPI(title="AutoAdmit Colab T4 Qwen2.5-7B Server", version="2.0.0")
     app.state.registry = reg
 
     @app.middleware("http")
     async def api_key_middleware(request: Request, call_next):
         provided = request.headers.get("X-API-Key", "")
         expected = fixed_key if fixed_key is not None else os.environ.get("COLAB_API_KEY", "")
-        # Fail closed if COLAB_API_KEY is unset or empty
         if not expected or not provided or not hmac.compare_digest(provided, expected):
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -152,59 +140,36 @@ def create_colab_app(registry: ModelRegistry | None = None, api_key: str | None 
         return {
             "status": "ok",
             "gpu_device": reg.device,
-            "vram_used_mb": reg.vram_used_mb,
-            "loaded_models": sorted(reg.models.keys()),
+            "vram_allocated_mb": reg.vram_allocated_mb,
+            "vram_total_mb": reg.vram_total_mb,
+            "model": reg.model_id,
+            "loaded": (reg.model is not None or reg.generate_fn is not None),
         }
 
-    @app.post("/score-links")
-    def score_links_endpoint(body: ScoreLinksRequest):
+    @app.post("/v1/chat/completions")
+    def chat_completions(body: ChatCompletionRequest):
         t0 = time.perf_counter()
-        if body.batch is not None:
-            if len(body.batch) > MAX_BATCH_SIZE:
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=f"Batch too large ({len(body.batch)}). Max allowed is {MAX_BATCH_SIZE}.",
-                )
-            batch_results = []
-            for item in body.batch:
-                q = str(item.get("query") or "")
-                lks = [LinkItem(**x) for x in (item.get("links") or [])]
-                batch_results.append(reg.score_links(q, lks, body.model, body.top_k))
-            return {
-                "model": body.model,
-                "batch_results": batch_results,
-                "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
-            }
-
-        if not body.query or body.links is None:
-            raise HTTPException(status_code=400, detail="Provide either (query + links) or batch.")
-        results = reg.score_links(body.query, body.links, body.model, body.top_k)
+        json_mode = bool(body.response_format and body.response_format.get("type") == "json_object")
+        content = reg.chat_complete(
+            body.messages,
+            temperature=body.temperature,
+            max_tokens=body.max_tokens,
+            json_mode=json_mode,
+        )
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
         return {
-            "model": body.model,
-            "results": results,
-            "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
-        }
-
-    @app.post("/html-to-md")
-    def html_to_md_endpoint(body: HtmlToMdRequest):
-        t0 = time.perf_counter()
-        if body.htmls is not None:
-            if len(body.htmls) > MAX_BATCH_SIZE:
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=f"Batch too large ({len(body.htmls)}). Max allowed is {MAX_BATCH_SIZE}.",
-                )
-            mds = [reg.html_to_markdown(h) for h in body.htmls]
-            return {
-                "markdowns": mds,
-                "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
-            }
-        if body.html is None:
-            raise HTTPException(status_code=400, detail="Provide either html or htmls.")
-        md = reg.html_to_markdown(body.html)
-        return {
-            "markdown": md,
-            "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": reg.model_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+            "latency_ms": latency_ms,
         }
 
     return app

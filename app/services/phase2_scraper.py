@@ -1,4 +1,4 @@
-"""Phase 2A: Polite per-domain directory crawler, JS SPA fallback, Clean Markdown pipeline, and permanent snapshots."""
+"""Phase 2A: Main-body-only profile link extractor, Deterministic Roster Verification Gate, polite crawler & Clean Markdown."""
 
 import asyncio
 import hashlib
@@ -27,10 +27,72 @@ SURNAMES = set(
     "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌毕单季裴霍涂成苗谷盛曲翁冉骆蓝路游辛靳管柴蒙鲍华喻祁蒲房滕屈饶解牟艾尤阳时穆农司卓古吉缪简车项连芦麦褚娄窦戚岑景党宫费卜冷晏席卫米柏宗瞿桂全佟应臧闵苟邬边卞姬师"
 )
 CJK_NAME_RE = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
-EN_NAME_RE = re.compile(r"^[A-Z][a-z]+(?: [A-Z][a-z\-]+){1,3}$")
+EN_NAME_RE = re.compile(r"^[A-Z][a-z]+(?: [A-Z][a-z\-]+){1,2}$")
 TITLE_BRACKET_RE = re.compile(r"[\(\（\[【].*?[\)\）\]】]|教授|副教授|研究员|副研究员|博导|硕导|博士|老师|Prof\.|Dr\.")
 DETAIL_ANCHOR_TEXTS = {"查看详情", "详情", "个人主页", "view details", "details", "profile", "more"}
 NEXT_PAGE_TEXTS = {"下一页", "下页", "next", ">", "›", "»"}
+
+# Strict URL/anchor denylist rejecting non-profile pages
+NON_PROFILE_URL_DENYLIST = (
+    "/news", "/notice", "/events", "/admissions", "/admission", "/application",
+    "/about", "/about_us", "/overview", "/research", "/academics", "/global",
+    "/careers", "/career", "/login", "/intllogin", "/open_position",
+    "/internationalization", "/schools___colleges/", "/campus", "/alumni",
+    "/contact", "/download", "/xwdt", "/tzgg", "/zsjy", "/kygk",
+)
+NON_PROFILE_ANCHOR_DENYLIST = (
+    "about us", "about", "news", "notice", "events", "admissions", "overview",
+    "research", "academics", "global", "careers", "login", "sign in", "contact",
+    "首页", "学院概况", "新闻动态", "通知公告", "招生信息", "科学研究", "人才培养",
+    "合作交流", "党群工作", "联系我们", "统一身份认证", "更多", "返回",
+)
+FACULTY_PROFILE_URL_PATTERNS = (
+    "/faculty/", "/people/", "/teacher/", "/teachers/", "/szdw/", "/jsml/",
+    "/info/", "/profile/", "/staff/", "/dsjs/", "/jsjj/",
+)
+GLOBAL_CHROME_SELECTORS = (
+    "header", "nav", "footer", ".breadcrumb", ".crumbs", ".navbar", ".top-nav",
+    ".global-nav", ".header", ".footer", "#header", "#footer", "#nav", ".menu",
+    ".topbar", ".site-header", ".site-footer",
+)
+
+
+def registrable_domain(host: str) -> str:
+    """Extracts root domain (e.g. 'tsinghua.edu.cn' from 'cs.tsinghua.edu.cn')."""
+    clean = (host or "").lower().split(":")[0].strip(".")
+    parts = [p for p in clean.split(".") if p]
+    if len(parts) >= 3 and (clean.endswith(".edu.cn") or clean.endswith(".ac.cn") or clean.endswith(".org.cn")):
+        return ".".join(parts[-3:])
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return clean
+
+
+def is_same_root_domain(url: str, root_domain: str) -> bool:
+    """Allows same-root academic subdomains (e.g. cs.tsinghua.edu.cn) while blocking external domains (e.g. 720yun.com)."""
+    host = urlparse(url).netloc.lower().split(":")[0]
+    target_root = registrable_domain(root_domain)
+    if not host or not target_root:
+        return False
+    return host == target_root or host.endswith("." + target_root)
+
+
+def _is_denied_url_or_anchor(abs_url: str, anchor_text: str) -> bool:
+    parsed = urlparse(abs_url)
+    path_low = (parsed.path or "/").lower()
+    full_low = abs_url.lower()
+    text_low = (anchor_text or "").strip().lower()
+
+    # Reject root index pages (e.g. /, /index.htm, /index.html)
+    if path_low in ("", "/", "/index.htm", "/index.html", "/index.php", "/index.jsp"):
+        return True
+    if any(bad in full_low for bad in NON_PROFILE_URL_DENYLIST):
+        return True
+    if text_low in NON_PROFILE_ANCHOR_DENYLIST:
+        return True
+    if path_low.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar", ".jpg", ".png", ".mp4")):
+        return True
+    return False
 
 
 def extract_breadcrumb_markers(html: str) -> str:
@@ -57,7 +119,6 @@ def clean_html_to_markdown(html: str) -> tuple[str, str]:
     4. Convert remaining HTML to clean Markdown via markdownify.
     """
     breadcrumb = extract_breadcrumb_markers(html)
-    # Replace email images before parsing/stripping
     patched_html = re.sub(
         r'<img\b[^>]*(?:email|mail|e-mail|邮箱|联系方式)[^>]*/?>',
         " [EMAIL_IMAGE_TAG] ",
@@ -87,25 +148,47 @@ def _looks_like_person_name(raw: str) -> bool:
     return bool(EN_NAME_RE.match(cleaned))
 
 
-def extract_profile_urls(html: str, base_url: str) -> list[str]:
-    """Extracts candidate professor profile URLs from a directory page, handling title brackets and detail cards."""
+def extract_profile_urls(html: str, base_url: str, root_domain: str | None = None) -> list[str]:
+    """
+    Main-body-only professor profile link extractor:
+    1. Strips <header>, <nav>, <footer>, .breadcrumb, and global nav menus before scanning.
+    2. Enforces strict same-root-domain lock (blocks external domains like 720yun.com).
+    3. Applies strict URL & anchor denylist (drops /news, /about, /login, /Schools___Colleges/, root index).
+    4. Prioritizes person-name anchors and faculty profile URL patterns.
+    """
     tree = LexborHTMLParser(html or "")
+    for sel in GLOBAL_CHROME_SELECTORS:
+        for node in tree.css(sel):
+            node.decompose()
+
+    expected_root = registrable_domain(root_domain or urlparse(base_url).netloc)
     seen: set[str] = set()
-    urls: list[str] = []
+    prioritized: list[tuple[int, str]] = []
 
     for a in tree.css("a[href]"):
         href = (a.attributes.get("href") or "").strip()
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
             continue
         abs_url = urljoin(base_url, href).split("#")[0]
-        if abs_url in seen:
+        if abs_url in seen or abs_url.rstrip("/") == base_url.rstrip("/"):
             continue
+        if expected_root and not is_same_root_domain(abs_url, expected_root):
+            continue
+
         text = re.sub(r"\s+", " ", a.text(separator=" ", strip=True) or a.attributes.get("title") or "").strip()
+        if _is_denied_url_or_anchor(abs_url, text):
+            continue
+
+        url_low = abs_url.lower()
+        has_prof_pattern = any(pat in url_low for pat in FACULTY_PROFILE_URL_PATTERNS)
+
         if _looks_like_person_name(text):
             seen.add(abs_url)
-            urls.append(abs_url)
+            score = 3 if has_prof_pattern else 2
+            prioritized.append((score, abs_url))
             continue
-        # Check parent card for "View Details" / "查看详情" links paired with a person name
+
+        # Check parent card for "View Details" / "查看详情" paired with a person name
         if text.lower() in DETAIL_ANCHOR_TEXTS:
             parent = a.parent
             if parent is not None:
@@ -113,8 +196,29 @@ def extract_profile_urls(html: str, base_url: str) -> list[str]:
                 tokens = [t.strip() for t in re.split(r"[\s,，|/]+", card_text) if t.strip()]
                 if any(_looks_like_person_name(tok) for tok in tokens):
                     seen.add(abs_url)
-                    urls.append(abs_url)
-    return urls
+                    score = 3 if has_prof_pattern else 2
+                    prioritized.append((score, abs_url))
+                    continue
+
+    prioritized.sort(key=lambda x: x[0], reverse=True)
+    return [u for _, u in prioritized]
+
+
+def verify_roster_html(
+    html: str,
+    url: str,
+    *,
+    root_domain: str | None = None,
+    min_profiles: int = 3,
+) -> tuple[bool, list[str]]:
+    """
+    Shared Deterministic Roster Verification Gate (used by SiteTreeBuilder & Phase1Discovery):
+    A candidate URL is accepted ONLY if its cleaned main-body yields >= 3 plausible same-domain profile links.
+    """
+    if not html or not url:
+        return False, []
+    candidates = extract_profile_urls(html, url, root_domain=root_domain)
+    return len(candidates) >= min_profiles, candidates
 
 
 def find_next_page_url(html: str, base_url: str) -> str | None:
@@ -169,6 +273,7 @@ class Phase2ScraperService:
         seen_pages: set[str] = set()
         current_url: str | None = roster_url
         used_playwright = False
+        root_dom = registrable_domain(urlparse(roster_url).netloc)
 
         async with httpx.AsyncClient(transport=self.transport) as client:
             for _ in range(max_pages):
@@ -189,13 +294,12 @@ class Phase2ScraperService:
                 except Exception as exc:
                     return StepResult.fail(ErrorCode.HTTP_ERROR, f"Roster fetch failed: {exc}")
 
-                links = extract_profile_urls(html, final_url) if st == 200 else []
+                links = extract_profile_urls(html, final_url, root_domain=root_dom) if st == 200 else []
 
-                # JS SPA Trigger: HTTP 200 AND 0 candidate profile links -> re-render with Playwright
                 if st == 200 and len(links) == 0 and self.admin.enable_playwright and self.playwright_fetcher is not None:
                     try:
                         st, final_url, html = await self.playwright_fetcher(final_url)
-                        links = extract_profile_urls(html, final_url)
+                        links = extract_profile_urls(html, final_url, root_domain=root_dom)
                         used_playwright = True
                     except Exception as exc:
                         return StepResult.fail(ErrorCode.PLAYWRIGHT_ERROR, f"Playwright directory render failed: {exc}")
@@ -218,7 +322,7 @@ class Phase2ScraperService:
         *,
         use_colab_readerlm: bool = False,
     ) -> StepResult:
-        """Fetches a single profile page, generates Clean Markdown, and permanently upserts into page_snapshots."""
+        """Fetches a single profile page, generates Clean Markdown via selectolax+markdownify, and upserts snapshot."""
         host = urlparse(profile_url).netloc
         await self._polite_wait(host)
 
@@ -238,12 +342,6 @@ class Phase2ScraperService:
 
         html = decode_bytes_safely(resp.content)
         markdown, breadcrumb = clean_html_to_markdown(html)
-
-        # Call Colab ReaderLM-v2 if extracted text is broken/empty or A/B flag is ON
-        if (not markdown or len(markdown) < 30 or use_colab_readerlm) and self.admin.enable_colab_bridge and self.colab.base_url:
-            colab_res = await self.colab.html_to_markdown(html, transport=self.transport)
-            if colab_res.ok and colab_res.data.get("markdown"):
-                markdown = colab_res.data["markdown"]
 
         snap = PageSnapshotDoc(
             url=str(resp.url),

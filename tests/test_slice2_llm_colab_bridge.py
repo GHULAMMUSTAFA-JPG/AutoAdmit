@@ -21,8 +21,10 @@ async def test_llm_router_primary_429_fails_over_to_backup():
         )
 
     router = LLMRouter(
-        primary=LLMEndpoint("primary", "https://primary.test/v1", "key-1", "gemini-2.0-flash-lite"),
-        backup=LLMEndpoint("backup", "https://backup.test/v1", "key-2", "gemini-3-8-flash"),
+        primary=LLMEndpoint("primary", "https://primary.test/v1", "key-1", "gemini-2.0-flash-lite", tier=2),
+        backup=LLMEndpoint("backup", "https://backup.test/v1", "key-2", "gemini-3-8-flash", tier=3),
+        enable_colab=False,
+        backoff_delays=(0.0,),
     )
     res = await router.complete(
         [{"role": "user", "content": "hello"}],
@@ -31,7 +33,7 @@ async def test_llm_router_primary_429_fails_over_to_backup():
     assert res.ok is True
     assert res.data["provider"] == "backup"
     assert res.data["content"] == '{"status":"ok"}'
-    assert len(calls) == 2
+    assert len(calls) == 3  # 1 initial primary + 1 backoff retry + 1 backup
 
 
 @pytest.mark.asyncio
@@ -104,9 +106,11 @@ async def test_llm_router_5xx_and_timeout_failover_and_both_fail():
         return httpx.Response(200, json={"choices": [{"message": {"content": "backup-ok"}}]})
 
     router = LLMRouter(
-        primary=LLMEndpoint("primary", "https://primary.test/v1", "k1", "m1"),
-        backup=LLMEndpoint("backup", "https://backup.test/v1", "k2", "m2"),
+        primary=LLMEndpoint("primary", "https://primary.test/v1", "k1", "m1", tier=2),
+        backup=LLMEndpoint("backup", "https://backup.test/v1", "k2", "m2", tier=3),
         max_concurrency=2,
+        enable_colab=False,
+        backoff_delays=(0.0,),
     )
     r503 = await router.complete([{"role": "user", "content": "hi"}], transport=httpx.MockTransport(h503))
     assert r503.ok is True

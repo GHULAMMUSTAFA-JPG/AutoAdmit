@@ -56,16 +56,28 @@ async def test_phase1_strategy_a_serper_hit_skips_bcd(monkeypatch):
 
         def handler(req: httpx.Request) -> httpx.Response:
             if "serper.dev" in str(req.url):
-                return httpx.Response(200, json={"organic": [{"link": "https://cs.pku.edu.cn/szdw"}]})
+                return httpx.Response(200, json={"organic": [{"title": "CS Faculty", "link": "https://cs.pku.edu.cn/szdw", "snippet": "PhD supervisors"}]})
             if str(req.url) == "https://cs.pku.edu.cn/szdw":
-                return httpx.Response(200, text="<html><body><h1>计算机学院师资队伍 博士生导师</h1></body></html>")
+                return httpx.Response(
+                    200,
+                    text="""<html><body><h1>计算机学院师资队伍 博士生导师</h1><main>
+                      <a href="https://cs.pku.edu.cn/info/1/zw.htm">张伟</a>
+                      <a href="https://cs.pku.edu.cn/info/2/lm.htm">李明</a>
+                      <a href="https://cs.pku.edu.cn/info/3/wf.htm">王芳</a>
+                    </main></body></html>""",
+                )
             return httpx.Response(404)
 
         nav_mock = AsyncMock()
-        svc = Phase1DiscoveryService(repo, nav_agent=nav_mock, transport=httpx.MockTransport(handler))
+        svc = Phase1DiscoveryService(
+            repo,
+            admin=AdminConfig(enable_colab_bridge=False, enable_playwright=False),
+            nav_agent=nav_mock,
+            transport=httpx.MockTransport(handler),
+        )
         res = await svc.discover("pku.edu.cn", "Computer Science", "phd")
         assert res.ok is True
-        assert res.data.winning_strategy == "SEARCH_FIRST"
+        assert res.data.winning_strategy == "SERPER_LLM_FALLBACK"
         assert res.data.faculty_roster_url == "https://cs.pku.edu.cn/szdw"
         nav_mock.navigate.assert_not_called()
     finally:
@@ -88,25 +100,38 @@ async def test_phase1_strategy_b_colab_online_and_cpu_fallback(monkeypatch):
             if u == "https://www.zju.edu.cn":
                 return httpx.Response(200, text='<html><body><a href="https://cs.zju.edu.cn/faculty">计算机学院师资队伍</a></body></html>')
             if u == "https://cs.zju.edu.cn/faculty":
-                return httpx.Response(200, text="<html><body><h1>计算机学院 硕士生导师名录</h1></body></html>")
+                return httpx.Response(
+                    200,
+                    text="""<html><body><h1>计算机学院 硕士生导师名录</h1><main>
+                      <a href="https://cs.zju.edu.cn/info/1/zw.htm">张伟</a>
+                      <a href="https://cs.zju.edu.cn/info/2/lm.htm">李明</a>
+                      <a href="https://cs.zju.edu.cn/info/3/wf.htm">王芳</a>
+                    </main></body></html>""",
+                )
             if u == "https://colab.test/score-links":
                 return httpx.Response(200, json={"results": [{"text": "计算机学院师资队伍", "href": "https://cs.zju.edu.cn/faculty", "score": 0.95}]})
             return httpx.Response(404)
 
-        # 1. With Colab online mock
-        colab_online = ColabClient(base_url="https://colab.test", api_key="k")
-        svc1 = Phase1DiscoveryService(repo, colab=colab_online, transport=httpx.MockTransport(handler))
+        # 1. Tree-First DFS discovery (masters)
+        svc1 = Phase1DiscoveryService(
+            repo,
+            admin=AdminConfig(enable_colab_bridge=False, enable_playwright=False),
+            transport=httpx.MockTransport(handler),
+        )
         res1 = await svc1.discover("zju.edu.cn", "Computer Science", "masters")
         assert res1.ok is True
-        assert res1.data.winning_strategy == "DIRECT_CRAWL"
+        assert res1.data.winning_strategy == "TREE_DFS"
         assert res1.data.faculty_roster_url == "https://cs.zju.edu.cn/faculty"
 
-        # 2. With Colab offline (CPU keyword fallback)
-        colab_offline = ColabClient(base_url="", api_key="")
-        svc2 = Phase1DiscoveryService(repo, colab=colab_offline, transport=httpx.MockTransport(handler))
+        # 2. Tree-First DFS discovery (phd) with Colab offline
+        svc2 = Phase1DiscoveryService(
+            repo,
+            admin=AdminConfig(enable_colab_bridge=False, enable_playwright=False),
+            transport=httpx.MockTransport(handler),
+        )
         res2 = await svc2.discover("zju.edu.cn", "Computer Science", "phd")
         assert res2.ok is True
-        assert res2.data.winning_strategy == "DIRECT_CRAWL"
+        assert res2.data.winning_strategy == "TREE_DFS"
     finally:
         await mgr.client.drop_database("autoadmit_p12_test_s3_b")
         await mgr.close()
@@ -204,21 +229,28 @@ async def test_phase1_strategy_c_waf_412_playwright_and_verification_gate_reject
             if u == "https://www.waf.edu.cn":
                 return httpx.Response(412, text="WAF Challenge")
             if u == "https://cs.waf.edu.cn/szdw":
-                return httpx.Response(200, text="<html><body><h1>计算机学院 硕士生导师</h1></body></html>")
+                return httpx.Response(
+                    200,
+                    text="""<html><body><h1>计算机学院 硕士生导师</h1><main>
+                      <a href="https://cs.waf.edu.cn/info/1/zw.htm">张伟</a>
+                      <a href="https://cs.waf.edu.cn/info/2/lm.htm">李明</a>
+                      <a href="https://cs.waf.edu.cn/info/3/wf.htm">王芳</a>
+                    </main></body></html>""",
+                )
             return httpx.Response(404)
 
         pw_mock = AsyncMock(
-            return_value=(200, "https://www.waf.edu.cn", '<html><body><a href="https://cs.waf.edu.cn/szdw">计算机学院师资队伍</a></body></html>')
+            return_value=(200, "https://www.waf.edu.cn", '<html><body><nav><a href="https://cs.waf.edu.cn/szdw">计算机学院师资队伍</a></nav></body></html>')
         )
         svc = Phase1DiscoveryService(
             repo,
-            admin=AdminConfig(enable_playwright=True, enable_agent_fallback=False),
+            admin=AdminConfig(enable_playwright=True, enable_agent_fallback=False, enable_colab_bridge=False),
             transport=httpx.MockTransport(waf_handler),
             playwright_fetcher=pw_mock,
         )
         res = await svc.discover("waf.edu.cn", "Computer Science", "masters")
         assert res.ok is True
-        assert res.data.winning_strategy == "PLAYWRIGHT_FALLBACK"
+        assert res.data.winning_strategy == "TREE_DFS"
         pw_mock.assert_called_once()
     finally:
         await mgr.client.drop_database("autoadmit_p12_test_s3_waf")

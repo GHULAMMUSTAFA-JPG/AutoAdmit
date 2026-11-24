@@ -19,6 +19,7 @@ class AdminConfigPatch(BaseModel):
     max_departments_per_request: int | None = None
     max_universities_per_job: int | None = None
     max_professors_per_uni: int | None = None
+    max_concurrent_universities: int | None = None
     allowed_countries: list[str] | None = None
     enable_serper: bool | None = None
     enable_playwright: bool | None = None
@@ -57,8 +58,10 @@ async def patch_admin_config(patch: AdminConfigPatch, request: Request):
     new_cfg = cfg.model_copy(update=updates)
     request.app.state.admin_config = new_cfg
     # Propagate runtime guardrails & feature toggles to all active services
-    for svc_name in ("phase1", "scraper", "extractor"):
+    for svc_name in ("phase1", "scraper", "extractor", "runner", "tree_builder"):
         svc = getattr(request.app.state, svc_name, None)
         if svc is not None and hasattr(svc, "admin"):
             svc.admin = new_cfg
+    from app.core.llm_router import llm_router
+    llm_router.enable_colab = new_cfg.enable_colab_bridge
     return new_cfg

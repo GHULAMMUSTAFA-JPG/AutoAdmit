@@ -72,6 +72,10 @@ async def ensure_permanent_indexes(db: AsyncIOMotorDatabase) -> None:
     await db["needs_review"].create_indexes([
         IndexModel([("domain", ASCENDING), ("stage", ASCENDING)], name="idx_review_domain_stage"),
     ])
+
+    await db["university_site_trees"].create_indexes([
+        IndexModel([("domain", ASCENDING)], unique=True, name="uniq_site_tree_domain"),
+    ])
     logger.info("permanent_indexes_verified")
 
 

@@ -66,12 +66,13 @@ class ProfessorDoc(BaseModel):
 
 
 class JobDoc(BaseModel):
-    """Resumable async job checkpoint & scorecard document in `jobs`."""
+    """Resumable async job checkpoint, per-university row details & scorecard document in `jobs`."""
     job_id: str
     request: dict[str, Any] = Field(default_factory=dict)
     status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"] = "QUEUED"
     target_domains: list[str] = Field(default_factory=list)
     completed_domains: list[str] = Field(default_factory=list)
+    university_details: dict[str, dict[str, Any]] = Field(default_factory=dict)
     errors: list[dict[str, Any]] = Field(default_factory=list)
     scorecard: dict[str, Any] = Field(default_factory=dict)
     started_at: datetime = Field(default_factory=utc_now)
@@ -87,3 +88,34 @@ class NeedsReviewDoc(BaseModel):
     detail: str
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class SiteTreeNode(BaseModel):
+    """Single discovered node inside a university's pruned site tree."""
+    url: str
+    label: str
+    zone: Literal["NAV", "SIDEBAR", "BODY"] = "BODY"
+    depth: int = 0
+    node_type: Literal["HOME", "SCHOOLS_DIR", "DEPT_HOME", "FACULTY_SECTION", "VERIFIED_ROSTER", "DEAD_END"] = "HOME"
+    parent_url: str | None = None
+    children: list[str] = Field(default_factory=list)
+
+
+class VerifiedRosterEntry(BaseModel):
+    """Cached verified faculty roster entry inside `university_site_trees.verified_rosters`."""
+    roster_url: str
+    department_url: str | None = None
+    strategy: str = "TREE_DFS"
+    candidate_profile_count: int = 0
+    verified_at: datetime = Field(default_factory=utc_now)
+
+
+class UniversitySiteTreeDoc(BaseModel):
+    """Permanent pruned site hierarchy + department map + verified rosters in `university_site_trees`."""
+    domain: str
+    root_url: str
+    markdown_tree: str = ""
+    nodes: list[SiteTreeNode] = Field(default_factory=list)
+    departments_map: dict[str, str] = Field(default_factory=dict)
+    verified_rosters: dict[str, VerifiedRosterEntry] = Field(default_factory=dict)
+    updated_at: datetime = Field(default_factory=utc_now)
