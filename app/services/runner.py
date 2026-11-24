@@ -54,7 +54,7 @@ class PipelineRunner:
         job_token = current_job_id.set(jid)
         try:
             existing = await self.repo.get_job(jid)
-            seed_docs = await self.repo.query_university_seeds(limit=500)
+            seed_docs = await self.repo.query_university_seeds(limit=2000)
             seed_map = {s.domain: s for s in seed_docs}
 
             if existing:

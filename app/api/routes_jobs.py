@@ -176,10 +176,10 @@ async def download_job_logs(job_id: str):
 async def list_universities_overview(request: Request):
     """Returns seeded universities enriched with site tree nav_type, mapped depts, Phase 1 status, and verified professor counts."""
     repo = _get_repo(request)
-    seeds = await repo.query_university_seeds(limit=500)
+    seeds = await repo.query_university_seeds(limit=2000)
     depts = await repo.list_department_docs()
     profs = await repo.list_professors()
-    trees = await repo.list_site_trees(limit=500)
+    trees = await repo.list_site_trees(limit=2000)
 
     dept_by_dom = {}
     for d in depts:
