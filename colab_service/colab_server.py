@@ -2,6 +2,7 @@
 
 import gc
 import hmac
+import inspect
 import os
 import time
 import uuid
@@ -42,12 +43,13 @@ class QwenModelRegistry:
         self.vram_total_mb: float = 0.0
 
     def load_qwen_4bit(self) -> None:
-        """Loads Qwen/Qwen2.5-7B-Instruct in 4-bit NF4 (float16 compute) cleanly inside Colab T4 15GB VRAM."""
+        """Loads Qwen/Qwen2.5-7B-Instruct in 4-bit NF4 onto GPU 0 cleanly inside Colab T4 15GB VRAM / 12.7GB RAM."""
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         use_cuda = torch.cuda.is_available()
         self.device = torch.cuda.get_device_name(0) if use_cuda else "cpu"
+        target_dtype = torch.float16 if use_cuda else torch.float32
 
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -56,13 +58,21 @@ class QwenModelRegistry:
             bnb_4bit_use_double_quant=True,
         )
 
+        # Use modern `dtype` arg when supported by transformers, else fallback to `torch_dtype`
+        from_pretrained_params = inspect.signature(AutoModelForCausalLM.from_pretrained).parameters
+        dtype_kw = {"dtype": target_dtype} if "dtype" in from_pretrained_params else {"torch_dtype": target_dtype}
+
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            quantization_config=bnb_config if use_cuda else None,
-            device_map="auto" if use_cuda else None,
-            torch_dtype=torch.float16 if use_cuda else torch.float32,
-        )
+        load_kwargs: dict[str, Any] = {
+            "low_cpu_mem_usage": True,
+            **dtype_kw,
+        }
+        if use_cuda:
+            load_kwargs["quantization_config"] = bnb_config
+            # Pin strictly to GPU 0 so accelerate never spills layers to Colab's 12.7 GB CPU RAM
+            load_kwargs["device_map"] = {"": 0}
+
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_id, **load_kwargs)
         self.model.eval()
         gc.collect()
         if use_cuda:
@@ -98,8 +108,9 @@ class QwenModelRegistry:
             raise HTTPException(status_code=503, detail=f"Model '{self.model_id}' is not loaded.")
 
         import torch
+        model_device = next(self.model.parameters()).device
         prompt_text = self.tokenizer.apply_chat_template(msg_dicts, tokenize=False, add_generation_prompt=True)
-        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.model.device)
+        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(model_device)
         do_sample = temperature > 0.0
         gen_kwargs: dict[str, Any] = {
             "max_new_tokens": min(max_tokens, MAX_NEW_TOKENS_CAP),
@@ -121,7 +132,7 @@ def create_colab_app(registry: QwenModelRegistry | None = None, api_key: str | N
     reg = registry or QwenModelRegistry()
     fixed_key = api_key
 
-    app = FastAPI(title="AutoAdmit Colab T4 Qwen2.5-7B Server", version="2.0.0")
+    app = FastAPI(title="AutoAdmit Colab T4 Qwen2.5-7B Server", version="2.1.0")
     app.state.registry = reg
 
     @app.middleware("http")
