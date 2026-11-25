@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     .saas-main { max-width: 1520px; width: 100%; margin: 0 auto; padding: 16px 24px 48px; }
     .saas-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
@@ -72,6 +73,15 @@
     /* Failure Summary Box */
     .failure-box { border: 1px solid var(--accent-amber-border); background: var(--accent-amber-subtle); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; }
     .failure-box.clean { border-color: var(--accent-green-border); background: var(--accent-green-subtle); color: var(--accent-green); }
+
+    /* Visual Analytics Charts Grid */
+    .analytics-charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+    @media (max-width: 960px) { .analytics-charts-grid { grid-template-columns: 1fr; } }
+    .chart-card { background: #fff; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow-sm); }
+    .chart-card-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .chart-card-title { font-size: 12.5px; font-weight: 700; color: var(--text-primary); }
+    .chart-card-sub { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+    .chart-canvas-wrap { position: relative; height: 220px; width: 100%; }
 
     /* Banner & Toolbar */
     .p12-banner { padding: 10px 14px; border-radius: 10px; border: 1px solid #bfdbfe; background: var(--primary-subtle); margin-top: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12.5px; }
@@ -385,6 +395,38 @@
 
           <div id="analytics-provider-cards" class="analytics-cards"></div>
           <div id="analytics-failure-summary" class="failure-box clean">No API breakages detected.</div>
+
+          <!-- Visual Analytics Graphs (Calls, Tokens, Usage Timeline, Benchmark Speed) -->
+          <div class="analytics-charts-grid">
+            <div class="chart-card">
+              <div class="chart-card-hdr">
+                <span class="chart-card-title">API Calls &amp; Health by Provider</span>
+                <span class="chart-card-sub">OK vs Failed</span>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="chart-provider-calls"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-hdr">
+                <span class="chart-card-title">Token Usage by Provider</span>
+                <span class="chart-card-sub">Prompt vs Completion Tokens</span>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="chart-provider-tokens"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-hdr">
+                <span class="chart-card-title">Calls &amp; Token Usage Over Time</span>
+                <span class="chart-card-sub">Hourly Calls vs Total Tokens</span>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="chart-usage-timeline"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-hdr">
+                <span class="chart-card-title">Benchmark Throughput vs Latency</span>
+                <span class="chart-card-sub">Req/Min vs Avg Latency (ms)</span>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="chart-benchmark-perf"></canvas></div>
+            </div>
+          </div>
 
           <!-- Colab & LLM Stress Benchmark Panel -->
           <div style="border:1px solid var(--border-subtle); border-radius:10px; padding:12px 14px; background:#f8fafc; margin-bottom:14px;">

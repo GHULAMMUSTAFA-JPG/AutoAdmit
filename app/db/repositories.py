@@ -271,6 +271,8 @@ class Repository:
 
         providers_init = {p: _empty_bucket(p) for p in ("colab_qwen", "deepseek", "gemini", "serper")}
         failure_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+        stage_groups: dict[str, dict[str, Any]] = {}
+        time_buckets: dict[str, dict[str, Any]] = {}
 
         cursor = self.db["api_call_traces"].find(query).sort("created_at", -1)
         async for doc in cursor:
@@ -281,17 +283,57 @@ class Repository:
             st = str(doc.get("status") or "ok")
             lat = int(doc.get("latency_ms") or 0)
             err = str(doc.get("error_detail") or "")
+            p_tok = int(doc.get("prompt_tokens") or 0)
+            c_tok = int(doc.get("completion_tokens") or 0)
+            t_tok = int(doc.get("total_tokens") or 0)
             bucket["total_calls"] += 1
             bucket["_lat_sum"] += lat
-            bucket["prompt_tokens"] += int(doc.get("prompt_tokens") or 0)
-            bucket["completion_tokens"] += int(doc.get("completion_tokens") or 0)
-            bucket["total_tokens"] += int(doc.get("total_tokens") or 0)
+            bucket["prompt_tokens"] += p_tok
+            bucket["completion_tokens"] += c_tok
+            bucket["total_tokens"] += t_tok
             if lat > bucket["max_latency_ms"]:
                 bucket["max_latency_ms"] = lat
+
+            # Stage aggregation
+            stage_key = str(doc.get("stage") or "unknown").strip() or "unknown"
+            if stage_key not in stage_groups:
+                stage_groups[stage_key] = {
+                    "stage": stage_key,
+                    "calls": 0,
+                    "ok_count": 0,
+                    "failed_count": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "_lat_sum": 0,
+                }
+            sg = stage_groups[stage_key]
+            sg["calls"] += 1
+            sg["prompt_tokens"] += p_tok
+            sg["completion_tokens"] += c_tok
+            sg["total_tokens"] += t_tok
+            sg["_lat_sum"] += lat
+
+            # Hourly timeline aggregation (UTC HH:00)
+            ca = doc.get("created_at")
+            if hasattr(ca, "strftime"):
+                tlabel = ca.strftime("%m-%d %H:00")
+            else:
+                tlabel = str(ca or "")[:13].replace("T", " ") + ":00"
+            if tlabel not in time_buckets:
+                time_buckets[tlabel] = {"bucket": tlabel, "calls": 0, "ok_count": 0, "failed_count": 0, "total_tokens": 0}
+            tb = time_buckets[tlabel]
+            tb["calls"] += 1
+            tb["total_tokens"] += t_tok
+
             if st == "ok":
                 bucket["ok_count"] += 1
+                sg["ok_count"] += 1
+                tb["ok_count"] += 1
             else:
                 bucket["failed_count"] += 1
+                sg["failed_count"] += 1
+                tb["failed_count"] += 1
                 if bucket["last_error"] is None:
                     bucket["last_error"] = {"status": st, "http_status": doc.get("http_status"), "detail": err[:240]}
                 # Strip dynamic retry timers (e.g. 'in 6s', 'in 12.5s') so identical 429s collapse cleanly
@@ -313,11 +355,21 @@ class Repository:
             b.pop("_lat_sum", None)
             providers_out[prov] = b
 
+        stages_out: list[dict[str, Any]] = []
+        for sg in sorted(stage_groups.values(), key=lambda x: x["calls"], reverse=True):
+            c = sg["calls"]
+            sg["avg_latency_ms"] = round(sg["_lat_sum"] / c, 1) if c else 0.0
+            sg.pop("_lat_sum", None)
+            stages_out.append(sg)
+
+        timeline_out = [time_buckets[k] for k in sorted(time_buckets.keys())][-24:]
         failures_sorted = sorted(failure_groups.values(), key=lambda x: x["count"], reverse=True)
         return {
             "job_id": job_id,
             "providers": providers_out,
             "failure_breakdown": failures_sorted,
+            "stage_breakdown": stages_out,
+            "timeline": timeline_out,
         }
 
     async def aggregate_domain_tokens(self, domain: str, *, job_id: str | None = None) -> dict[str, int]:

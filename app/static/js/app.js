@@ -612,10 +612,13 @@ async function loadAnalytics() {
       }
     }
     if (benchRes.ok) {
-      renderBenchmarkHistory(await benchRes.json());
+      const benchRuns = await benchRes.json();
+      renderBenchmarkHistory(benchRuns);
+      renderBenchmarkChart(benchRuns);
     }
     if (ovRes.ok) {
       const ov = await ovRes.json();
+      renderAnalyticsCharts(ov);
       if (ov.queue_state) updateQueueModeBadge(ov.queue_state);
       const cardsEl = document.getElementById("analytics-provider-cards");
       const order = ["colab_qwen", "deepseek", "gemini", "serper"];
@@ -689,6 +692,172 @@ async function loadAnalytics() {
   } catch (e) {
     console.error("Analytics load error:", e);
   }
+}
+
+const _analyticsCharts = {};
+
+function _mountChart(canvasId, config) {
+  if (typeof Chart === "undefined") return;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (_analyticsCharts[canvasId]) {
+    try { _analyticsCharts[canvasId].destroy(); } catch (_) {}
+  }
+  _analyticsCharts[canvasId] = new Chart(canvas.getContext("2d"), config);
+}
+
+function renderAnalyticsCharts(ov) {
+  if (typeof Chart === "undefined") return;
+  const order = ["colab_qwen", "deepseek", "gemini", "serper"];
+  const labels = order.map(k => (PROVIDER_LABELS[k] || k).replace(/\s*\(Tier \d\)/, ""));
+  const provs = ov.providers || {};
+
+  // 1. API Calls & Health by Provider (Stacked Bar)
+  _mountChart("chart-provider-calls", {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "OK Calls",
+          data: order.map(k => (provs[k]?.ok_count) || 0),
+          backgroundColor: "rgba(22, 163, 74, 0.82)",
+          borderRadius: 4,
+        },
+        {
+          label: "Failed / 429 / Timeout",
+          data: order.map(k => (provs[k]?.failed_count) || 0),
+          backgroundColor: "rgba(220, 38, 38, 0.80)",
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+    },
+  });
+
+  // 2. Token Usage by Provider (Grouped Bar: Prompt vs Completion)
+  _mountChart("chart-provider-tokens", {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Prompt Tokens",
+          data: order.map(k => (provs[k]?.prompt_tokens) || 0),
+          backgroundColor: "rgba(37, 99, 235, 0.82)",
+          borderRadius: 4,
+        },
+        {
+          label: "Completion Tokens",
+          data: order.map(k => (provs[k]?.completion_tokens) || 0),
+          backgroundColor: "rgba(124, 58, 237, 0.82)",
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { y: { beginAtZero: true } },
+    },
+  });
+
+  // 3. Calls & Token Usage Over Time (Dual-Axis Bar + Line)
+  const timeline = ov.timeline || [];
+  _mountChart("chart-usage-timeline", {
+    type: "bar",
+    data: {
+      labels: timeline.map(t => t.bucket),
+      datasets: [
+        {
+          type: "bar",
+          label: "OK Calls",
+          data: timeline.map(t => t.ok_count || 0),
+          backgroundColor: "rgba(16, 185, 129, 0.72)",
+          yAxisID: "y",
+          stack: "calls",
+          borderRadius: 3,
+        },
+        {
+          type: "bar",
+          label: "Failed Calls",
+          data: timeline.map(t => t.failed_count || 0),
+          backgroundColor: "rgba(239, 68, 68, 0.72)",
+          yAxisID: "y",
+          stack: "calls",
+          borderRadius: 3,
+        },
+        {
+          type: "line",
+          label: "Total Tokens",
+          data: timeline.map(t => t.total_tokens || 0),
+          borderColor: "#2563eb",
+          backgroundColor: "rgba(37, 99, 235, 0.12)",
+          yAxisID: "y1",
+          tension: 0.28,
+          fill: false,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true, ticks: { maxRotation: 35, font: { size: 10 } } },
+        y: { stacked: true, beginAtZero: true, position: "left", title: { display: true, text: "Calls", font: { size: 10 } } },
+        y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Tokens", font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function renderBenchmarkChart(runs) {
+  if (typeof Chart === "undefined") return;
+  const ordered = [...(runs || [])].reverse().slice(-20);
+  _mountChart("chart-benchmark-perf", {
+    type: "bar",
+    data: {
+      labels: ordered.map(r => `${r.concurrency}x ${r.payload_size.replace("_", " ")}`),
+      datasets: [
+        {
+          type: "bar",
+          label: "Speed (Req/Min)",
+          data: ordered.map(r => r.requests_per_min || 0),
+          backgroundColor: "rgba(37, 99, 235, 0.78)",
+          yAxisID: "y",
+          borderRadius: 4,
+        },
+        {
+          type: "line",
+          label: "Avg Latency (ms)",
+          data: ordered.map(r => r.avg_latency_ms || 0),
+          borderColor: "#f59e0b",
+          backgroundColor: "rgba(245, 158, 11, 0.15)",
+          yAxisID: "y1",
+          tension: 0.25,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { maxRotation: 40, font: { size: 10 } } },
+        y: { beginAtZero: true, position: "left", title: { display: true, text: "Req/Min", font: { size: 10 } } },
+        y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Latency (ms)", font: { size: 10 } } },
+      },
+    },
+  });
 }
 
 function renderBenchmarkHistory(runs) {
