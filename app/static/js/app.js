@@ -100,8 +100,8 @@ function downloadDebugBundle() {
 function updateQueueModeBadge(qs) {
   const el = document.getElementById("hdr-queue-badge");
   if (!el || !qs) return;
-  const mode = qs.queue_mode || "PARALLEL_5X";
-  const conc = qs.active_concurrency ?? 5;
+  const mode = qs.queue_mode || "PARALLEL_4X";
+  const conc = qs.active_concurrency ?? 4;
   el.textContent = `${mode} (${conc}x)`;
   el.className = `p12-badge ${mode.includes("THROTTLED") ? "p12-badge-warn" : "p12-badge-ok"}`;
 }
@@ -1016,7 +1016,7 @@ async function loadAdminConfig() {
     document.getElementById("adm-max-depts").value = c.max_departments_per_request;
     document.getElementById("adm-max-unis").value = c.max_universities_per_job;
     document.getElementById("adm-max-profs").value = c.max_professors_per_uni;
-    document.getElementById("adm-max-concurrent").value = c.max_concurrent_universities ?? 5;
+    document.getElementById("adm-max-concurrent").value = c.max_concurrent_universities ?? 4;
     document.getElementById("adm-countries").value = (c.allowed_countries || []).join(", ");
     const map = [
       ["adm-enable-serper", c.enable_serper],
@@ -1044,7 +1044,7 @@ async function saveAdminConfig(btn) {
       max_departments_per_request: parseInt(document.getElementById("adm-max-depts").value, 10),
       max_universities_per_job: parseInt(document.getElementById("adm-max-unis").value, 10),
       max_professors_per_uni: parseInt(document.getElementById("adm-max-profs").value, 10),
-      max_concurrent_universities: parseInt(document.getElementById("adm-max-concurrent")?.value || "5", 10),
+      max_concurrent_universities: parseInt(document.getElementById("adm-max-concurrent")?.value || "4", 10),
       allowed_countries: document.getElementById("adm-countries").value.split(",").map(s => s.trim()).filter(Boolean),
       enable_serper: document.getElementById("adm-enable-serper").checked,
       enable_playwright: document.getElementById("adm-enable-playwright").checked,

@@ -74,8 +74,8 @@ class JobDoc(BaseModel):
     job_id: str
     request: dict[str, Any] = Field(default_factory=dict)
     status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"] = "QUEUED"
-    queue_mode: str = "PARALLEL_5X"
-    active_concurrency: int = 5
+    queue_mode: str = "PARALLEL_4X"
+    active_concurrency: int = 4
     target_domains: list[str] = Field(default_factory=list)
     completed_domains: list[str] = Field(default_factory=list)
     university_details: dict[str, dict[str, Any]] = Field(default_factory=dict)

@@ -97,7 +97,7 @@ class LLMRouter:
         colab: LLMEndpoint | None = None,
         max_concurrency: int = 4,
         timeout_sec: float = 30.0,
-        colab_timeout_sec: float = 30.0,
+        colab_timeout_sec: float = 45.0,
         colab_cooldown_sec: float = 60.0,
         backoff_delays: tuple[float, ...] = (2.0, 4.0),
         tier2_min_interval_sec: float | None = None,
@@ -148,8 +148,8 @@ class LLMRouter:
         self._colab_consecutive_failures: int = 0
         self._colab_consecutive_ok: int = 0
         self._colab_recent_latencies: list[int] = []
-        self.queue_mode: str = "PARALLEL_5X"
-        self.active_concurrency: int = 5
+        self.queue_mode: str = "PARALLEL_4X"
+        self.active_concurrency: int = 4
         self.trace_repo = trace_repo
 
     def set_trace_repo(self, repo: Any) -> None:
@@ -192,10 +192,10 @@ class LLMRouter:
             self._colab_recent_latencies = self._colab_recent_latencies[-20:]
         if latency_ms < 12000:
             self._colab_consecutive_ok += 1
-            if self._colab_consecutive_ok >= 2 and self.queue_mode != "PARALLEL_5X":
-                self.queue_mode = "PARALLEL_5X"
-                self.active_concurrency = 5
-                logger.info("adaptive_concurrency_recovered", queue_mode=self.queue_mode, active_concurrency=5)
+            if self._colab_consecutive_ok >= 2 and self.queue_mode != "PARALLEL_4X":
+                self.queue_mode = "PARALLEL_4X"
+                self.active_concurrency = 4
+                logger.info("adaptive_concurrency_recovered", queue_mode=self.queue_mode, active_concurrency=4)
         else:
             self._colab_consecutive_ok = 0
 

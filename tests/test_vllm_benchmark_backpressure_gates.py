@@ -145,15 +145,16 @@ async def test_adaptive_backpressure_5_to_1_recovery_tier1_thinking_off_and_tier
         assert r2.ok is True
         assert elapsed >= 0.12
 
-        # 3. Tier 1 recovers -> 2 consecutive healthy T1 calls < 12s restore PARALLEL_5X (5x)
+        # 3. Tier 1 recovers -> 2 consecutive healthy T1 calls < 12s restore PARALLEL_4X (4x)
         t1_mode["fail"] = False
         router.reset_colab_circuit()
         r3 = await router.complete([{"role": "user", "content": "ok1"}], transport=httpx.MockTransport(handler))
         r4 = await router.complete([{"role": "user", "content": "ok2"}], transport=httpx.MockTransport(handler))
         assert r3.ok and r3.data["tier"] == 1
         assert r4.ok and r4.data["tier"] == 1
-        assert router.queue_mode == "PARALLEL_5X"
-        assert router.active_concurrency == 5
+        assert router.queue_mode == "PARALLEL_4X"
+        assert router.active_concurrency == 4
+        assert LLMRouter().colab.timeout_sec == 45.0
     finally:
         await mgr.client.drop_database("autoadmit_p12_test_bp")
         await mgr.close()
