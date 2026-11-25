@@ -1,12 +1,20 @@
 """Admin routes for on-demand 3-Step Smart Diff-Sync and runtime AdminConfig guardrails."""
 
+import hmac
 from typing import Any
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+from app.core.config import settings
+from app.core.logging import get_logger
 from app.schemas.filters import AdminConfig
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
+logger = get_logger("api.routes_admin")
+
+
+class ColabUrlUpdate(BaseModel):
+    base_url: str
 
 
 class AdminSyncRequest(BaseModel):
@@ -65,3 +73,27 @@ async def patch_admin_config(patch: AdminConfigPatch, request: Request):
     from app.core.llm_router import llm_router
     llm_router.enable_colab = new_cfg.enable_colab_bridge
     return new_cfg
+
+
+@router.post("/colab-url")
+async def update_colab_url(body: ColabUrlUpdate, request: Request):
+    """Hot-swaps Tier 1 Colab Qwen URL in memory (zero restart, resets circuit-breaker) when Colab tunnel rotates."""
+    provided = request.headers.get("X-API-Key", "")
+    expected = settings.COLAB_API_KEY or ""
+    if not expected or not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing X-API-Key.")
+
+    clean_url = body.base_url.strip().rstrip("/")
+    if not clean_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="base_url must start with http:// or https://")
+
+    from app.core.llm_router import llm_router
+    from app.services.colab_client import colab_client
+
+    llm_router.colab.base_url = f"{clean_url}/v1"
+    llm_router._colab_open_until = 0.0
+    colab_client.base_url = clean_url
+    settings.COLAB_BASE_URL = clean_url
+
+    logger.info("colab_url_synced", base_url=clean_url)
+    return {"ok": True, "colab_base_url": clean_url, "circuit_reset": True}

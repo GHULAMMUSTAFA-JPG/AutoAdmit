@@ -75,10 +75,44 @@ ensure_cloudflared() {
 # STEP 3: Start Public HTTPS Tunnel (Decoupled — failure NEVER kills Qwen!)
 # ---------------------------------------------------------------------------
 start_localhost_run() {
-  echo "[3/3] Starting auto-reconnecting HTTPS tunnel via localhost.run (no account / no Cloudflare 429)..."
-  echo "      Copy the https://*.lhr.life URL printed below into COLAB_BASE_URL in Oracle .env"
+  local sync_url="${ORACLE_SYNC_URL:-https://catalogue-tutorial-ending-homepage.trycloudflare.com/api/v1/admin/colab-url}"
+  echo "[3/3] Starting auto-reconnecting + auto-syncing HTTPS tunnel via localhost.run..."
+  echo "      Auto-sync target: ${sync_url}"
   while true; do
-    ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R "80:127.0.0.1:${PORT}" nokey@localhost.run -- --output json || true
+    ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R "80:127.0.0.1:${PORT}" nokey@localhost.run -- --output json 2>&1 | python3 -u -c "
+import json, os, sys, urllib.request
+
+sync_url = os.environ.get('ORACLE_SYNC_URL', '${sync_url}').strip()
+api_key = os.environ.get('COLAB_API_KEY', '').strip()
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line.startswith('{'):
+        if line and 'Welcome to' not in line and 'admin.localhost.run' not in line:
+            print(line, flush=True)
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get('type') == 'run.localhost.tunnel.registered':
+        addr = (ev.get('data') or {}).get('address') or ev.get('subject')
+        if addr:
+            url = f'https://{addr}'
+            print(f'[TUNNEL LIVE] {url}', flush=True)
+            if sync_url and api_key:
+                try:
+                    req = urllib.request.Request(
+                        sync_url,
+                        data=json.dumps({'base_url': url}).encode('utf-8'),
+                        headers={'Content-Type': 'application/json', 'X-API-Key': api_key},
+                        method='POST',
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        print(f'[AUTO-SYNC OK] Oracle VPS updated -> {url} ({r.status})', flush=True)
+                except Exception as exc:
+                    print(f'[AUTO-SYNC WARN] Failed to sync {url}: {exc}', flush=True)
+" || true
     echo "[WARN] localhost.run tunnel disconnected; Qwen stays loaded in VRAM. Reconnecting in 2s..."
     sleep 2
   done
