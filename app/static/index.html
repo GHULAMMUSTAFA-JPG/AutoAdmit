@@ -125,6 +125,10 @@
         </div>
         <div class="header-controls-group">
           <div class="control-box">
+            <span class="control-label">Queue Mode</span>
+            <span id="hdr-queue-badge" class="p12-badge p12-badge-ok">PARALLEL_5X (5x)</span>
+          </div>
+          <div class="control-box">
             <span class="control-label">Active Job</span>
             <span id="hdr-job-badge" class="p12-badge p12-badge-muted">Idle</span>
           </div>
@@ -138,6 +142,7 @@
           <div style="display:flex; gap:6px;">
             <button class="btn btn-secondary btn-sm" onclick="downloadUniversities('csv')" title="Download Universities CSV">&#8681; Unis CSV</button>
             <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('', 'csv')" title="Download All Professors CSV">&#8681; All Profs CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadDebugBundle()" title="Download Full Debug Bundle JSON">&#128230; Debug Bundle</button>
           </div>
         </div>
       </div>
@@ -197,6 +202,9 @@
             <div class="saas-btn-group">
               <button id="btn-build-trees-only" class="btn btn-primary" onclick="buildTreesOnly(this)">1. Build &amp; Verify Trees</button>
               <button id="btn-extract-trees" class="btn btn-success" onclick="extractFromVerifiedTrees(this)">2. Extract from Verified Trees</button>
+              <label style="display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-secondary); padding:4px 8px; border:1px solid var(--border-subtle); border-radius:6px; background:#f8fafc; cursor:pointer;" title="Re-extract even already-verified professors">
+                <input type="checkbox" id="f-force-reextract" /> Force Re-extract
+              </label>
               <button id="btn-start-job" class="btn btn-secondary" onclick="startDiscoveryJob(this)">&#9654; Run Full Pipeline</button>
               <button class="btn btn-secondary btn-sm" onclick="refreshAllData()">&#8635; Refresh</button>
             </div>
@@ -256,7 +264,7 @@
                   <th>Nav Type</th>
                   <th>Status</th>
                   <th>Verified Roster URL</th>
-                  <th>Depts Mapped</th>
+                  <th>Depts / Tokens</th>
                   <th>Verified Profs</th>
                   <th style="width:210px;">Actions &amp; Export</th>
                 </tr>
@@ -335,10 +343,11 @@
                   <th>Error Code</th>
                   <th>Detail</th>
                   <th>URL</th>
+                  <th style="width:120px;">Audit</th>
                 </tr>
               </thead>
               <tbody id="review-table-body">
-                <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>
+                <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>
               </tbody>
             </table>
           </div>
@@ -367,11 +376,68 @@
                 <option value="connection_error">connection_error</option>
               </select>
               <button class="btn btn-primary btn-sm" onclick="loadAnalytics()">&#8635; Refresh Analytics</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadDebugBundle()">&#128230; Debug Bundle JSON</button>
+            </div>
+            <div class="tab-toolbar-group">
+              <span id="colab-gpu-pill" class="p12-badge p12-badge-muted">Live GPU: Checking...</span>
             </div>
           </div>
 
           <div id="analytics-provider-cards" class="analytics-cards"></div>
           <div id="analytics-failure-summary" class="failure-box clean">No API breakages detected.</div>
+
+          <!-- Colab & LLM Stress Benchmark Panel -->
+          <div style="border:1px solid var(--border-subtle); border-radius:10px; padding:12px 14px; background:#f8fafc; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <div>
+                <strong style="font-size:13px;">Colab &amp; LLM Stress Benchmark</strong>
+                <span id="bench-status-msg" style="font-size:12px; color:var(--text-secondary); margin-left:8px;">Test T4 vLLM continuous batching &amp; cloud throughput before full crawls.</span>
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <select id="bench-provider" class="form-control form-control-sm" style="width:130px;">
+                  <option value="colab_qwen">Colab Qwen</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+                <select id="bench-concurrency" class="form-control form-control-sm" style="width:125px;">
+                  <option value="1">Conc: 1</option>
+                  <option value="2" selected>Conc: 2</option>
+                  <option value="4">Conc: 4</option>
+                  <option value="6">Conc: 6</option>
+                </select>
+                <select id="bench-payload" class="form-control form-control-sm" style="width:155px;">
+                  <option value="nav_500">Payload: ~500 tok</option>
+                  <option value="roster_2000">Payload: ~2,000 tok</option>
+                  <option value="prof_4500">Payload: ~4,500 tok</option>
+                </select>
+                <select id="bench-batch" class="form-control form-control-sm" style="width:105px;">
+                  <option value="5" selected>Batch: 5</option>
+                  <option value="10">Batch: 10</option>
+                  <option value="20">Batch: 20</option>
+                </select>
+                <button id="btn-run-benchmark" class="btn btn-primary btn-sm" onclick="runStressBenchmark(this)">&#9654; Run Benchmark</button>
+              </div>
+            </div>
+            <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border-subtle); border-radius:8px; background:#fff;">
+              <table class="saas-table">
+                <thead>
+                  <tr>
+                    <th>Run #</th>
+                    <th>Provider / Model</th>
+                    <th>Conc / Payload</th>
+                    <th>Avg In / Out Tok</th>
+                    <th>Total Time</th>
+                    <th>Avg / Max Latency</th>
+                    <th>Speed (Req/Min)</th>
+                    <th>OK / Fail</th>
+                  </tr>
+                </thead>
+                <tbody id="benchmark-history-body">
+                  <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:14px;">No benchmark runs yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           <div class="saas-scroll-340">
             <table class="saas-table">
@@ -381,7 +447,7 @@
                   <th>Provider &amp; Model</th>
                   <th>Stage / Domain</th>
                   <th>Status</th>
-                  <th>Latency</th>
+                  <th>Latency / Tokens</th>
                   <th>Error / Detail</th>
                 </tr>
               </thead>
@@ -539,14 +605,44 @@
         <button class="btn btn-secondary btn-sm" onclick="closeTreeModal()">&times; Close</button>
       </div>
       <div class="saas-modal-body">
+        <div id="site-tree-tokens" style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;"></div>
         <div class="saas-split">
           <div>
             <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Markdown Site Tree</div>
-            <pre id="site-tree-md" class="saas-code-pre"></pre>
+            <pre id="site-tree-md" class="saas-code-pre" style="max-height:260px;"></pre>
           </div>
           <div>
             <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Departments Map &amp; Verified Rosters</div>
-            <pre id="site-tree-depts" class="saas-code-pre"></pre>
+            <pre id="site-tree-depts" class="saas-code-pre" style="max-height:260px;"></pre>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Step-by-Step Navigation Audit Trail</div>
+          <pre id="site-tree-trail" class="saas-code-pre" style="max-height:200px;"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rejection Grounding Audit Modal (Tab 3) -->
+  <div id="audit-modal-backdrop" class="saas-modal-backdrop hidden" onclick="if(event.target===this) closeAuditModal()">
+    <div class="saas-modal">
+      <div class="saas-modal-hdr">
+        <div>
+          <strong id="audit-modal-title">Inspect Rejection Grounding Audit</strong>
+          <div id="audit-modal-meta" style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;"></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="closeAuditModal()">&times; Close</button>
+      </div>
+      <div class="saas-modal-body">
+        <div class="saas-split">
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Raw LLM Output &amp; Extracted Quotes</div>
+            <pre id="audit-modal-llm" class="saas-code-pre"></pre>
+          </div>
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Source Markdown Excerpt</div>
+            <pre id="audit-modal-md" class="saas-code-pre"></pre>
           </div>
         </div>
       </div>

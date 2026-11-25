@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from app.core.llm_router import llm_router
 from app.core.logging import current_domain, current_job_id, get_logger
 from app.db.repositories import Repository
 from app.schemas.entities import JobDoc, UniversityDeptDoc, utc_now
@@ -35,6 +36,7 @@ class ExtractFromTreesRequest(BaseModel):
     department: str = Field(default="Computer Science")
     degree: Literal["masters", "phd", "both"] = Field(default="masters")
     tier: str | None = Field(default="top_10")
+    force_reextract: bool = Field(default=False)
     run_sync: bool = Field(default=False)
 
 
@@ -101,6 +103,7 @@ async def _run_tree_build_job(
                                 "winning_strategy": strat,
                                 "nav_type": tree_doc.nav_type if tree_doc else "UNKNOWN",
                                 "departments_mapped_count": mapped_cnt,
+                                "token_stats": tree_doc.token_stats if tree_doc else {},
                                 "faculty_roster_url": data["roster_url"],
                                 "department_url": data.get("department_url"),
                                 "professors_found": prof_cnt,
@@ -243,26 +246,37 @@ async def _run_tree_extract_job(
     roster_map: dict[str, dict[str, Any]],
     department: str,
     degree: str,
+    force_reextract: bool = False,
 ) -> JobDoc:
-    """Step 2 Batch Executor: runs Phase 2A + Phase 2B in parallel across universities with saved verified_rosters."""
+    """Step 2 Batch Executor: runs Phase 2A + Phase 2B with adaptive 5->1 backpressure and $0 skip for already-verified professors."""
     jid = job.job_id
     job_token = current_job_id.set(jid)
     try:
         job.status = "RUNNING"
+        job.queue_mode = llm_router.queue_mode
+        job.active_concurrency = min(max(1, admin.max_concurrent_universities), max(1, llm_router.active_concurrency))
         await repo.upsert_job(job)
-        logger.info("tree_extract_job_started", job_id=jid, target_count=len(job.target_domains), department=department, degree=degree)
+        logger.info("tree_extract_job_started", job_id=jid, target_count=len(job.target_domains), department=department, degree=degree, force_reextract=force_reextract)
 
         lock = asyncio.Lock()
         queue: asyncio.Queue[str] = asyncio.Queue()
         for d in job.target_domains:
             queue.put_nowait(d)
 
+        active_workers = 0
+        slot_cond = asyncio.Condition()
+
         async def _worker() -> None:
+            nonlocal active_workers
             while not queue.empty():
-                try:
-                    dom = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+                async with slot_cond:
+                    while active_workers >= min(max(1, admin.max_concurrent_universities), max(1, llm_router.active_concurrency)):
+                        await slot_cond.wait_for(lambda: active_workers < min(max(1, admin.max_concurrent_universities), max(1, llm_router.active_concurrency)))
+                    try:
+                        dom = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    active_workers += 1
                 dom_token = current_domain.set(dom)
                 try:
                     meta = roster_map[dom]
@@ -275,6 +289,7 @@ async def _run_tree_extract_job(
                     uni_found = 0
                     uni_verified = 0
                     uni_attempts = 0
+                    uni_skipped = 0
                     uni_err: dict[str, Any] | None = None
 
                     crawl_res = await scraper.crawl_roster_urls(roster_url)
@@ -283,16 +298,25 @@ async def _run_tree_extract_job(
                         logger.warning("phase2_crawl_failed", job_id=jid, domain=dom, error_code=crawl_res.error_code, detail=crawl_res.detail)
                     else:
                         prof_urls = crawl_res.data["profile_urls"]
+                        roster_title = crawl_res.data.get("roster_title", "")
                         uni_found = len(prof_urls)
                         logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found)
                         for prof_url in prof_urls:
+                            # $0 Resume: skip already-VERIFIED professors unless force_reextract=True
+                            if not force_reextract:
+                                existing_p = await repo.get_professor_by_url(prof_url)
+                                if existing_p and existing_p.grounding_status == "VERIFIED":
+                                    uni_verified += 1
+                                    uni_skipped += 1
+                                    continue
+
                             snap_res = await scraper.fetch_and_snapshot_profile(prof_url, dom)
                             if not snap_res.ok:
                                 logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code=snap_res.error_code)
                                 continue
                             uni_attempts += 1
                             ext_res = await extractor.extract_from_snapshot(
-                                snap_res.data, department=department, source_roster_url=roster_url
+                                snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
                             )
                             if ext_res.ok:
                                 uni_verified += 1
@@ -322,13 +346,16 @@ async def _run_tree_extract_job(
                     )
 
                     async with lock:
+                        job.queue_mode = llm_router.queue_mode
+                        job.active_concurrency = min(max(1, admin.max_concurrent_universities), max(1, llm_router.active_concurrency))
                         job.scorecard["mode"] = "TREE_EXTRACT"
                         job.scorecard["grounding_attempts"] = job.scorecard.get("grounding_attempts", 0) + uni_attempts
-                        job.scorecard["grounding_passed"] = job.scorecard.get("grounding_passed", 0) + uni_verified
+                        job.scorecard["grounding_passed"] = job.scorecard.get("grounding_passed", 0) + (uni_verified - uni_skipped)
                         attempts = job.scorecard["grounding_attempts"]
                         passed = job.scorecard["grounding_passed"]
                         job.scorecard["grounding_pass_pct"] = round((passed / attempts) * 100.0, 2) if attempts else 100.0
                         job.scorecard["total_verified_professors"] = job.scorecard.get("total_verified_professors", 0) + uni_verified
+                        job.scorecard["skipped_cached_professors"] = job.scorecard.get("skipped_cached_professors", 0) + uni_skipped
                         if uni_err:
                             job.errors.append(uni_err)
                             job.scorecard["failures"] = job.scorecard.get("failures", 0) + 1
@@ -341,15 +368,18 @@ async def _run_tree_extract_job(
                             "professors_verified": uni_verified,
                             "status": row_status,
                             "error_code": uni_err["error_code"] if uni_err else None,
-                            "detail": uni_err["detail"] if uni_err else f"Verified {uni_verified} professors",
+                            "detail": uni_err["detail"] if uni_err else f"Verified {uni_verified} professors ({uni_skipped} cached)",
                         })
                         if dom not in job.completed_domains:
                             job.completed_domains.append(dom)
                         await repo.upsert_job(job)
-                        logger.info("tree_extract_uni_done", job_id=jid, domain=dom, status=row_status, professors_verified=uni_verified)
+                        logger.info("tree_extract_uni_done", job_id=jid, domain=dom, status=row_status, professors_verified=uni_verified, skipped_cached=uni_skipped)
                 finally:
                     current_domain.reset(dom_token)
                     queue.task_done()
+                    async with slot_cond:
+                        active_workers = max(0, active_workers - 1)
+                        slot_cond.notify_all()
 
         workers = min(max(1, admin.max_concurrent_universities), max(1, queue.qsize()))
         await asyncio.gather(*[_worker() for _ in range(workers)])
@@ -452,7 +482,9 @@ async def extract_from_trees_endpoint(body: ExtractFromTreesRequest, request: Re
     await repo.upsert_job(job)
 
     if body.run_sync:
-        done = await _run_tree_extract_job(repo, scraper, extractor, admin, job, roster_map, body.department, body.degree)
+        done = await _run_tree_extract_job(
+            repo, scraper, extractor, admin, job, roster_map, body.department, body.degree, force_reextract=body.force_reextract
+        )
         return {
             "source": "job",
             "job_id": done.job_id,
@@ -462,7 +494,11 @@ async def extract_from_trees_endpoint(body: ExtractFromTreesRequest, request: Re
             "scorecard": done.scorecard,
         }
 
-    asyncio.create_task(_run_tree_extract_job(repo, scraper, extractor, admin, job, roster_map, body.department, body.degree))
+    asyncio.create_task(
+        _run_tree_extract_job(
+            repo, scraper, extractor, admin, job, roster_map, body.department, body.degree, force_reextract=body.force_reextract
+        )
+    )
     return {
         "source": "job",
         "job_id": job_id,
@@ -485,6 +521,7 @@ async def list_trees_endpoint(request: Request):
             "departments_mapped_count": len(t.departments_map),
             "verified_rosters_count": len(t.verified_rosters),
             "nodes_count": len(t.nodes),
+            "token_stats": t.token_stats,
             "updated_at": t.updated_at.isoformat(),
         }
         for t in trees
@@ -493,7 +530,7 @@ async def list_trees_endpoint(request: Request):
 
 @router.get("/{domain}")
 async def get_tree_by_domain(domain: str, request: Request):
-    """Returns the saved markdown_tree, departments_map, and verified_rosters for a university domain."""
+    """Returns the saved markdown_tree, departments_map, navigation_trail, token_stats, and verified_rosters."""
     repo: Repository = request.app.state.repo
     tree = await repo.get_site_tree(domain)
     if not tree:
@@ -505,5 +542,7 @@ async def get_tree_by_domain(domain: str, request: Request):
         "markdown_tree": tree.markdown_tree,
         "departments_map": tree.departments_map,
         "verified_rosters": {k: v.model_dump(mode="json") for k, v in tree.verified_rosters.items()},
+        "navigation_trail": tree.navigation_trail,
+        "token_stats": tree.token_stats,
         "updated_at": tree.updated_at.isoformat(),
     }

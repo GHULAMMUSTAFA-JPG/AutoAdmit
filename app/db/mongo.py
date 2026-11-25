@@ -1,8 +1,9 @@
 """Motor async MongoDB connection pool and permanent (NO-TTL) index manager."""
 
+import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING, IndexModel
-from pymongo.errors import AutoReconnect
+from pymongo.errors import AutoReconnect, ServerSelectionTimeoutError
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -30,7 +31,8 @@ class MongoManager:
             self.db = self.client[self.db_name]
             try:
                 await ensure_permanent_indexes(self.db)
-            except AutoReconnect:
+            except (AutoReconnect, ServerSelectionTimeoutError):
+                await asyncio.sleep(0.5)
                 await ensure_permanent_indexes(self.db)
             logger.info("mongo_connected", db_name=self.db_name)
         assert self.db is not None
@@ -85,6 +87,25 @@ async def ensure_permanent_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("trace_id", ASCENDING)], unique=True, name="uniq_api_trace_id"),
         IndexModel([("job_id", ASCENDING), ("provider", ASCENDING), ("created_at", ASCENDING)], name="idx_trace_job_provider"),
         IndexModel([("status", ASCENDING), ("created_at", ASCENDING)], name="idx_trace_status"),
+    ])
+
+    await db["benchmark_runs"].create_indexes([
+        IndexModel([("run_id", ASCENDING)], unique=True, name="uniq_benchmark_run_id"),
+        IndexModel([("created_at", ASCENDING)], name="idx_benchmark_created"),
+    ])
+
+    await db["http_fetch_traces"].create_indexes([
+        IndexModel([("trace_id", ASCENDING)], unique=True, name="uniq_http_fetch_trace_id"),
+        IndexModel([("job_id", ASCENDING), ("domain", ASCENDING)], name="idx_http_fetch_job_dom"),
+    ])
+
+    await db["phase2_link_audits"].create_indexes([
+        IndexModel([("audit_id", ASCENDING)], unique=True, name="uniq_link_audit_id"),
+        IndexModel([("job_id", ASCENDING), ("domain", ASCENDING)], name="idx_link_audit_job_dom"),
+    ])
+
+    await db["system_state"].create_indexes([
+        IndexModel([("key", ASCENDING)], unique=True, name="uniq_system_state_key"),
     ])
     logger.info("permanent_indexes_verified")
 

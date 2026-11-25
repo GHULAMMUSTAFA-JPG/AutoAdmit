@@ -91,9 +91,14 @@ async def update_colab_url(body: ColabUrlUpdate, request: Request):
     from app.services.colab_client import colab_client
 
     llm_router.colab.base_url = f"{clean_url}/v1"
-    llm_router._colab_open_until = 0.0
+    llm_router.reset_colab_circuit()
     colab_client.base_url = clean_url
     settings.COLAB_BASE_URL = clean_url
+
+    # Persist in MongoDB system_state so restarts remember the latest synced URL (never touching .env)
+    repo = getattr(request.app.state, "repo", None)
+    if repo is not None:
+        await repo.set_system_state("colab_base_url", clean_url)
 
     logger.info("colab_url_synced", base_url=clean_url)
     return {"ok": True, "colab_base_url": clean_url, "circuit_reset": True}

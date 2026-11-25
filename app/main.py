@@ -33,6 +33,15 @@ def create_app(manager: MongoManager | None = None, admin_config: AdminConfig | 
         db = await mgr.connect()
         repo = Repository(db)
         llm_router.set_trace_repo(repo)
+        # Restore last auto-synced Colab URL from MongoDB system_state if present
+        persisted_colab = await repo.get_system_state("colab_base_url")
+        if persisted_colab and isinstance(persisted_colab, str) and persisted_colab.startswith(("http://", "https://")):
+            from app.services.colab_client import colab_client
+            clean_u = persisted_colab.rstrip("/")
+            llm_router.colab.base_url = f"{clean_u}/v1"
+            colab_client.base_url = clean_u
+            from app.core.config import settings
+            settings.COLAB_BASE_URL = clean_u
         phase1 = Phase1DiscoveryService(repo, admin=cfg)
         scraper = Phase2ScraperService(repo, admin=cfg)
         extractor = Phase2ExtractorService(repo, admin=cfg)

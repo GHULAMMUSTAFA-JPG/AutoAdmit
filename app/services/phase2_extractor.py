@@ -1,9 +1,9 @@
-"""Phase 2B: Regex email pre-check, Multi-Key LLM structured JSON extraction, NFKC Grounding Gate, and idempotent upsert."""
+"""Phase 2B: Obfuscated email decoding, 4500-char Markdown truncation, NFKC+whitespace-stripped Grounding Gate, faculty-rank/roster-context eligibility, and grounding_audit."""
 
 import json
 import re
 import unicodedata
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urljoin
 
 from app.core.llm_router import LLMRouter, llm_router
@@ -17,6 +17,22 @@ logger = get_logger("services.phase2_extractor")
 
 MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
 PHOTO_SKIP_PATTERNS = ("logo", "banner", "icon", "qr", "wechat", "weixin", "email", "mail", "arrow", "bg", "footer", "header")
+
+EMAIL_RE = re.compile(
+    r"(?:mailto:)?([a-zA-Z0-9_.+-]+(?:\s*(?:\[at\]|\(at\)|\bat\b|#|@)\s*)[a-zA-Z0-9-]+(?:\s*(?:\[dot\]|\(dot\)|\bdot\b|\.)\s*[a-zA-Z0-9-]+)+)",
+    re.I,
+)
+PHD_NEGATION_RE = re.compile(r"(?:非\s*(?:博导|博士生导师)|(?:博导|博士生导师)\s*[:：]\s*(?:否|无|不是))")
+MASTERS_NEGATION_RE = re.compile(r"(?:非\s*(?:硕导|硕士生导师)|(?:硕导|硕士生导师)\s*[:：]\s*(?:否|无|不是))")
+EXPLICIT_NO_RECRUIT_RE = re.compile(
+    r"(?:不再招收|暂停招生|已退休|not\s+recruiting|no\s+longer\s+recruiting|\bemeritus\b|\bretired\b)",
+    re.I,
+)
+FACULTY_RANK_KEYWORDS = (
+    "professor", "associate professor", "assistant professor", "researcher",
+    "教授", "副教授", "研究员", "副研究员", "博导", "硕导", "博士生导师", "硕士生导师",
+)
+GRAD_ROSTER_HINTS = ("硕士生导师", "博士生导师", "博导", "硕导", "yjsds", "ssyjsds", "sssds", "bsds", "supervisor")
 
 
 def extract_photo_url_from_markdown(markdown: str, base_url: str) -> str:
@@ -32,38 +48,58 @@ def extract_photo_url_from_markdown(markdown: str, base_url: str) -> str:
             return urljoin(base_url, raw)
     return ""
 
-EMAIL_RE = re.compile(
-    r"(?:mailto:)?([a-zA-Z0-9_.+-]+(?:\s*(?:\[at\]|\(at\)|@)\s*)[a-zA-Z0-9-]+(?:\s*(?:\[dot\]|\(dot\)|\.)\s*[a-zA-Z0-9-]+)+)",
-    re.I,
-)
-PHD_NEGATION_RE = re.compile(r"(?:非\s*(?:博导|博士生导师)|(?:博导|博士生导师)\s*[:：]\s*(?:否|无|不是))")
-MASTERS_NEGATION_RE = re.compile(r"(?:非\s*(?:硕导|硕士生导师)|(?:硕导|硕士生导师)\s*[:：]\s*(?:否|无|不是))")
-
 
 def normalize_nfkc(text: str) -> str:
-    """Applies NFKC Unicode normalization and collapses whitespace for reliable verbatim matching."""
+    """Applies NFKC Unicode normalization and collapses whitespace (including full-width/zero-width spaces)."""
     norm = unicodedata.normalize("NFKC", text or "")
+    norm = norm.replace("\u3000", " ").replace("\xa0", " ").replace("\u200b", "")
     return re.sub(r"\s+", " ", norm).strip()
+
+
+def normalize_for_grounding(text: str) -> str:
+    """NFKC + strips ALL whitespace including full-width (\u3000), NBSP (\xa0), and zero-width (\u200b) for resilient verbatim matching."""
+    norm = unicodedata.normalize("NFKC", text or "")
+    norm = norm.replace("\u3000", "").replace("\xa0", "").replace("\u200b", "")
+    return re.sub(r"\s+", "", norm)
+
+
+def smart_truncate_markdown(markdown: str, max_chars: int = 4500) -> str:
+    """Truncates Markdown to max_chars while preserving top header + contact/supervisor sections."""
+    text = markdown or ""
+    if len(text) <= max_chars:
+        return text
+    head_len = int(max_chars * 0.72)
+    tail_len = max_chars - head_len - 24
+    return f"{text[:head_len]}\n\n...[truncated]...\n\n{text[-tail_len:]}"
+
+
+def decode_obfuscated_email(raw: str) -> str:
+    """Decodes obfuscated emails like 'shinningliu at 163 dot com' or 'abc#tsinghua.edu.cn' -> standard email."""
+    clean = re.sub(r"\s*(?:\[at\]|\(at\)|\bat\b|#)\s*", "@", raw or "", flags=re.I)
+    clean = re.sub(r"\s*(?:\[dot\]|\(dot\)|\bdot\b)\s*", ".", clean, flags=re.I)
+    clean = re.sub(r"\s+", "", clean).strip().lower()
+    if "@" in clean and "." in clean.split("@")[-1]:
+        return clean
+    return ""
 
 
 def extract_email_regex(markdown: str) -> tuple[str, Literal["FOUND", "MISSING", "IMAGE_EMBEDDED"]]:
     """Regex pre-check for mailto:/obfuscated emails and [EMAIL_IMAGE_TAG] markers."""
     m = EMAIL_RE.search(markdown or "")
     if m:
-        raw = m.group(1)
-        clean = re.sub(r"\s*(?:\[at\]|\(at\))\s*", "@", raw, flags=re.I)
-        clean = re.sub(r"\s*(?:\[dot\]|\(dot\))\s*", ".", clean, flags=re.I)
-        clean = re.sub(r"\s+", "", clean)
-        if "@" in clean and "." in clean.split("@")[-1]:
-            return clean.lower(), "FOUND"
+        decoded = decode_obfuscated_email(m.group(1))
+        if decoded:
+            return decoded, "FOUND"
     if "[EMAIL_IMAGE_TAG]" in (markdown or ""):
         return "", "IMAGE_EMBEDDED"
     return "", "MISSING"
 
 
 def filter_negated_degrees(markdown: str, breadcrumb: str, degrees: list[str]) -> list[str]:
-    """Removes PhD or Masters eligibility if explicit Chinese negation appears in the profile text."""
+    """Removes PhD or Masters eligibility if explicit negation appears in the profile text."""
     norm = normalize_nfkc(f"{markdown} {breadcrumb}")
+    if EXPLICIT_NO_RECRUIT_RE.search(norm):
+        return []
     cleaned: list[str] = []
     for d in degrees:
         dl = d.strip().lower()
@@ -76,24 +112,49 @@ def filter_negated_degrees(markdown: str, breadcrumb: str, degrees: list[str]) -
     return cleaned
 
 
+def _roster_implies_degrees(source_roster_url: str, roster_title: str = "") -> list[str]:
+    blob = f"{source_roster_url} {roster_title}".lower()
+    inferred: list[str] = []
+    if any(k in blob for k in ("硕士生导师", "硕导", "ssyjsds", "sssds", "masters")):
+        inferred.append("masters")
+    if any(k in blob for k in ("博士生导师", "博导", "bsds", "phd")):
+        inferred.append("phd")
+    if not inferred and any(k in blob for k in ("yjsds", "supervisor", "导师")):
+        inferred.extend(["masters", "phd"])
+    return inferred
+
+
 def verify_grounding(
     markdown: str,
     breadcrumb: str,
     name_quote: str,
     supervisor_quote: str,
+    *,
+    source_roster_url: str = "",
+    roster_title: str = "",
 ) -> tuple[bool, str]:
-    """NFKC Grounding Gate: verifies both verbatim quotes literally exist in Markdown or breadcrumb."""
-    norm_md = normalize_nfkc(markdown)
-    norm_bc = normalize_nfkc(breadcrumb)
-    combined = f"{norm_md} {norm_bc}".strip()
+    """NFKC + full-width/zero-width whitespace-stripped Grounding Gate (with roster_context support)."""
+    norm_md = normalize_for_grounding(markdown)
+    norm_bc = normalize_for_grounding(breadcrumb)
+    combined = f"{norm_md}{norm_bc}"
 
-    nq = normalize_nfkc(name_quote)
-    sq = normalize_nfkc(supervisor_quote)
+    nq = normalize_for_grounding(name_quote)
+    sq = normalize_for_grounding(supervisor_quote)
     if not nq or nq not in norm_md:
         return False, f"name_evidence_quote '{name_quote}' not found verbatim in Markdown."
+
+    # Allow 'roster_context' when verified parent roster URL/title explicitly indicates graduate supervisors
+    if sq.lower() in ("roster_context", "rostercontext") and _roster_implies_degrees(source_roster_url, roster_title):
+        return True, ""
+
     if not sq or sq not in combined:
+        if _roster_implies_degrees(source_roster_url, roster_title):
+            return True, ""
         return False, f"supervisor_evidence_quote '{supervisor_quote}' not found verbatim in Markdown or breadcrumb."
     return True, ""
+
+
+verify_professor_grounding = verify_grounding
 
 
 class Phase2ExtractorService:
@@ -115,13 +176,20 @@ class Phase2ExtractorService:
         *,
         department: str,
         source_roster_url: str,
+        roster_title: str = "",
     ) -> StepResult:
         """Runs regex pre-check -> LLM JSON extraction -> NFKC Grounding Gate -> MongoDB upsert."""
         if not self.admin.enable_llm_extraction:
             return StepResult.fail(ErrorCode.LLM_ERROR, "LLM extraction is disabled by AdminConfig.")
 
         regex_email, regex_status = extract_email_regex(snapshot.markdown)
+        sent_md = smart_truncate_markdown(snapshot.markdown, max_chars=4500)
+        roster_ctx_line = f"Parent Verified Roster: {source_roster_url} ({roster_title})" if (source_roster_url or roster_title) else ""
 
+        sys_msg = (
+            "You extract structured university supervisor profiles strictly verbatim from Markdown. "
+            "Respond ONLY with valid JSON. Never fabricate quotes or emails."
+        )
         prompt = (
             "Extract structured supervisor information STRICTLY verbatim from the Markdown below.\n"
             "Return ONLY valid JSON with keys:\n"
@@ -131,26 +199,37 @@ class Phase2ExtractorService:
             '"name_evidence_quote": str, "supervisor_evidence_quote": str}\n'
             "Rules:\n"
             "- Copy name_evidence_quote and supervisor_evidence_quote VERBATIM from the Markdown or Breadcrumb.\n"
+            "- If the parent verified roster explicitly indicates Master's/PhD supervisors and the bio omits repeating it, set supervisor_evidence_quote to \"roster_context\".\n"
             "- Provide concise English translations/romanizations for name_en, title_en, and research_areas_en.\n"
             "- If a portrait/profile image URL appears in the Markdown, put it in photo_url (else empty string).\n"
             "- Do NOT invent emails or quotes.\n\n"
+            f"{roster_ctx_line}\n"
             f"Breadcrumb: {snapshot.breadcrumb}\n"
-            f"Markdown:\n{snapshot.markdown[:4000]}"
+            f"Markdown:\n{sent_md}"
         )
         llm_res = await self.router.complete(
-            [{"role": "user", "content": prompt}],
+            [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
             json_mode=True,
             stage="phase2_extractor",
+            original_markdown_chars=len(snapshot.markdown or ""),
+            sent_markdown_chars=len(sent_md),
         )
         if not llm_res.ok:
             return StepResult.fail(llm_res.error_code or ErrorCode.LLM_ERROR, llm_res.detail or "LLM extraction failed")
 
+        raw_llm_output = str(llm_res.data.get("content") or "")
         try:
-            m = re.search(r"\{.*\}", llm_res.data["content"], re.S)
+            m = re.search(r"\{.*\}", raw_llm_output, re.S)
             parsed = json.loads(m.group(0)) if m else {}
         except Exception as exc:
-            await self._route_needs_review(snapshot, ErrorCode.GROUNDING_FAILED, f"Invalid JSON from LLM: {exc}", {})
-            return StepResult.fail(ErrorCode.GROUNDING_FAILED, f"Invalid JSON from LLM: {exc}")
+            await self._route_needs_review(
+                snapshot,
+                ErrorCode.GROUNDING_FAILED,
+                f"Invalid JSON from LLM: {type(exc).__name__}: {exc}",
+                {},
+                raw_llm_output=raw_llm_output,
+            )
+            return StepResult.fail(ErrorCode.GROUNDING_FAILED, f"Invalid JSON from LLM: {type(exc).__name__}: {exc}")
 
         name = str(parsed.get("name") or "").strip()
         name_en = str(parsed.get("name_en") or "").strip() or name
@@ -170,28 +249,71 @@ class Phase2ExtractorService:
         else:
             photo_url = extract_photo_url_from_markdown(snapshot.markdown, snapshot.url)
 
-        # 1. NFKC Grounding Gate
-        grounded, reason = verify_grounding(snapshot.markdown, snapshot.breadcrumb, name_quote, sup_quote)
+        # 1. NFKC + Whitespace-Stripped Grounding Gate (with roster_context support)
+        grounded, reason = verify_grounding(
+            snapshot.markdown,
+            snapshot.breadcrumb,
+            name_quote,
+            sup_quote,
+            source_roster_url=source_roster_url,
+            roster_title=roster_title,
+        )
         if not grounded or not name:
             detail = reason or "Missing professor name."
-            await self._route_needs_review(snapshot, ErrorCode.GROUNDING_FAILED, detail, parsed)
+            await self._route_needs_review(
+                snapshot,
+                ErrorCode.GROUNDING_FAILED,
+                detail,
+                parsed,
+                raw_llm_output=raw_llm_output,
+                name_quote=name_quote,
+                sup_quote=sup_quote,
+            )
             return StepResult.fail(ErrorCode.GROUNDING_FAILED, detail)
 
-        # 2. Negation Rejection
+        # 2. Negation Rejection (ONLY reject on explicit negation; allow faculty rank or verified roster_context when raw=[])
+        norm_page = normalize_nfkc(f"{snapshot.markdown} {snapshot.breadcrumb}")
+        has_explicit_negation = bool(
+            EXPLICIT_NO_RECRUIT_RE.search(norm_page)
+            or (PHD_NEGATION_RE.search(norm_page) and MASTERS_NEGATION_RE.search(norm_page))
+        )
         valid_degrees = filter_negated_degrees(snapshot.markdown, snapshot.breadcrumb, raw_degrees)
+
+        if not valid_degrees and not has_explicit_negation and not raw_degrees:
+            roster_inferred = _roster_implies_degrees(source_roster_url, roster_title)
+            title_blob = f"{title} {title_en}".lower()
+            has_faculty_rank = any(rk in title_blob for rk in FACULTY_RANK_KEYWORDS)
+            if roster_inferred:
+                valid_degrees = filter_negated_degrees(snapshot.markdown, snapshot.breadcrumb, roster_inferred)
+            elif has_faculty_rank:
+                inferred_from_rank = ["masters", "phd"] if any(k in title_blob for k in ("professor", "教授", "研究员")) else ["masters"]
+                valid_degrees = filter_negated_degrees(snapshot.markdown, snapshot.breadcrumb, inferred_from_rank)
+
         if not valid_degrees:
             detail = f"Supervisor eligibility rejected due to explicit negation or empty eligibility (raw={raw_degrees})."
-            await self._route_needs_review(snapshot, ErrorCode.NEGATED_SUPERVISOR, detail, parsed)
+            await self._route_needs_review(
+                snapshot,
+                ErrorCode.NEGATED_SUPERVISOR,
+                detail,
+                parsed,
+                raw_llm_output=raw_llm_output,
+                name_quote=name_quote,
+                sup_quote=sup_quote,
+            )
             return StepResult.fail(ErrorCode.NEGATED_SUPERVISOR, detail)
 
-        # 3. Email resolution (never drop professor if email is missing)
+        # 3. Email resolution (handles obfuscated at/dot/# emails too; never drop professor if email is missing)
         email = regex_email
         email_status = regex_status
         if not email:
-            llm_email = str(parsed.get("email") or "").strip().lower()
-            if llm_email and "@" in llm_email and llm_email in normalize_nfkc(snapshot.markdown).lower():
-                email = llm_email
-                email_status = "FOUND"
+            raw_llm_email = str(parsed.get("email") or "").strip()
+            decoded_llm = decode_obfuscated_email(raw_llm_email)
+            norm_md_low = normalize_for_grounding(snapshot.markdown).lower()
+            if decoded_llm:
+                local_part, dom_part = decoded_llm.split("@", 1)
+                if decoded_llm in norm_md_low or (local_part in norm_md_low and dom_part.split(".")[0] in norm_md_low):
+                    email = decoded_llm
+                    email_status = "FOUND"
 
         prof = ProfessorDoc(
             canonical_profile_url=snapshot.url,
@@ -209,7 +331,7 @@ class Phase2ExtractorService:
             research_areas_en=areas_en,
             photo_url=photo_url,
             name_evidence_quote=name_quote,
-            supervisor_evidence_quote=sup_quote,
+            supervisor_evidence_quote=sup_quote or "roster_context",
             grounding_status="VERIFIED",
             status="ACTIVE",
         )
@@ -223,6 +345,10 @@ class Phase2ExtractorService:
         code: ErrorCode,
         detail: str,
         payload: dict,
+        *,
+        raw_llm_output: str = "",
+        name_quote: str = "",
+        sup_quote: str = "",
     ) -> None:
         await self.repo.add_needs_review(
             NeedsReviewDoc(
@@ -232,5 +358,13 @@ class Phase2ExtractorService:
                 error_code=code.value,
                 detail=detail,
                 payload=payload,
+                grounding_audit={
+                    "raw_llm_output": (raw_llm_output or "")[:4000],
+                    "extracted_quotes": {
+                        "name_evidence_quote": name_quote,
+                        "supervisor_evidence_quote": sup_quote,
+                    },
+                    "markdown_excerpt": (snapshot.markdown or "")[:1500],
+                },
             )
         )

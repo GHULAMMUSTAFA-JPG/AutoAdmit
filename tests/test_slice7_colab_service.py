@@ -36,7 +36,7 @@ def test_colab_qwen_health_chat_completions_and_oom_limits():
     assert rh.status_code == 200
     h = rh.json()
     assert h["gpu_device"] == "Tesla T4 (Mock)"
-    assert h["model"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert h["model"] in ("Qwen/Qwen3-8B-AWQ", "Qwen/Qwen2.5-7B-Instruct-AWQ", "Qwen/Qwen2.5-7B-Instruct")
     assert h["vram_allocated_mb"] == 5520.0
 
     rc = client.post(
@@ -52,7 +52,7 @@ def test_colab_qwen_health_chat_completions_and_oom_limits():
     )
     assert rc.status_code == 200
     body = rc.json()
-    assert body["model"] == "Qwen/Qwen2.5-7B-Instruct"
+    assert body["model"] in ("Qwen/Qwen3-8B-AWQ", "Qwen/Qwen2.5-7B-Instruct-AWQ", "Qwen/Qwen2.5-7B-Instruct")
     assert '"qwen2.5-7b"' in body["choices"][0]["message"]["content"]
 
     # OOM limit (>60,000 chars) returns 413

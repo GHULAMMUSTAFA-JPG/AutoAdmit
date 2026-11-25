@@ -17,6 +17,7 @@ from app.core.types import ErrorCode, StepResult
 from app.db.repositories import Repository
 from app.schemas.entities import (
     ApiCallTraceDoc,
+    HttpFetchTraceDoc,
     SiteTreeNode,
     UniversitySiteTreeDoc,
     VerifiedRosterEntry,
@@ -27,6 +28,7 @@ from app.services.nav_agent import _default_playwright_fetch
 from app.services.phase1_discovery import DEGREE_ZH, decode_bytes_safely
 from app.services.phase2_scraper import (
     CAROUSEL_SELECTORS,
+    extract_breadcrumb_markers,
     is_root_or_index_url,
     is_same_root_domain,
     registrable_domain,
@@ -44,20 +46,28 @@ BODY_NOISE_PATTERNS = (
     "/news", "/notice", "/events", "/login", "/intllogin", "/alumni", "/campus",
     "/careers", "/contact", "/admissions", "/admission", "/about", "/overview",
     "/xwdt", "/tzgg", "/zsjy", "/2020/", "/2021/", "/2022/", "/2023/", "/2024/", "/2025/", "/2026/",
+    "/publications",
 )
 SCHOOLS_DIR_KEYWORDS = ("院系设置", "学院设置", "学部院系", "机构设置", "教学单位", "schools", "colleges", "departments", "faculties")
 FACULTY_BRANCH_KEYWORDS = ("师资", "教师", "导师", "在职教师", "博导", "硕导", "faculty", "people", "staff", "teachers", "supervisors")
 ENGLISH_BROCHURE_PREFIXES = ("ev.", "en.", "english.", "intl.", "iso.")
 BLOCKED_SUBDOMAIN_PREFIXES = (
     "stuex.", "iczu.", "iso.", "sie.", "admission.", "gs.", "hr.", "lib.", "news.", "alumni.",
+    "jwc.", "rsc.", "yjsy.",
+)
+ADMIN_PATH_DENYLIST = (
+    "jyjx", "bksjy", "zzjg", "szgk", "xywh", "ggfw", "dqgz", "djgz", "xsgz", "fwzn", "sjjx", "rcxq",
+    "/publications",
 )
 NON_CS_COLLEGE_KEYWORDS = (
     "医学院", "法学院", "经济", "管理", "外文", "新闻", "历史", "哲学", "艺术", "体育", "农学",
-    "medical", "law", "business", "shmc.",
+    "物理", "化学", "生物", "medical", "law", "business", "physics.", "shmc.",
 )
+CS_HOST_PATH_TOKENS = ("cs.", "scs.", "cse.", "computer.", "it.", "jsj.", "xxgc.", "ai.", "computing.", "/cs/", "/cse/", "/computer/", "/jsj/")
+FACULTY_TITLE_DENSITY_WORDS = ("教授", "副教授", "讲师", "博导", "硕导", "研究员", "professor", "associate professor", "assistant professor")
 
 DEPT_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "computer science": ("computer", "计算机", "计算", "cs."),
+    "computer science": ("computer", "计算机", "计算", "cs.", "cse.", "scs.", "jsj.", "computing."),
     "artificial intelligence": ("artificial intelligence", "人工智能", "智能", "ai."),
     "software engineering": ("software", "软件", "se."),
     "cyber security": ("cyber", "网络空间安全", "信息安全", "网安"),
@@ -76,16 +86,77 @@ def is_cs_engineering_department(department: str) -> bool:
     return any(k in low for k in ("computer", "software", "artificial intelligence", "ai", "cyber", "engineering", "电子", "计算机", "软件", "人工智能"))
 
 
-def is_blocked_academic_link(url: str, label: str = "", department: str = "") -> bool:
-    """Blocks non-academic/exchange subdomains and non-CS colleges when targeting CS/Engineering."""
-    host = urlparse(url or "").netloc.lower()
+def is_admin_or_hr_url(url: str) -> bool:
+    """Blocks university-wide admin/HR/undergrad subdomains and paths (jwc., rsc., jyjx, zzjg, etc.)."""
+    parsed = urlparse(url or "")
+    host = parsed.netloc.lower()
+    path = (parsed.path or "").lower()
     if any(host.startswith(p) for p in BLOCKED_SUBDOMAIN_PREFIXES):
+        return True
+    if any(bad in path for bad in ADMIN_PATH_DENYLIST):
+        return True
+    return False
+
+
+def is_blocked_academic_link(url: str, label: str = "", department: str = "") -> bool:
+    """Blocks admin/HR/exchange subdomains & paths and non-CS colleges when targeting CS/Engineering."""
+    if is_admin_or_hr_url(url):
         return True
     if is_cs_engineering_department(department):
         blob = f"{label} {url}".lower()
         if any(kw in blob for kw in NON_CS_COLLEGE_KEYWORDS):
             return True
     return False
+
+
+def matches_department_scope(url: str, html: str, department: str) -> bool:
+    """Requires candidate roster URL to match target department host/path OR mention the department in title/breadcrumb."""
+    dept_low = (department or "").strip().lower()
+    if not dept_low:
+        return True
+    url_low = (url or "").lower()
+    syns = DEPT_SYNONYMS.get(dept_low, (dept_low,))
+    if is_cs_engineering_department(dept_low) and any(tok in url_low for tok in CS_HOST_PATH_TOKENS):
+        return True
+    if any(s in url_low for s in syns):
+        return True
+    bc = extract_breadcrumb_markers(html).lower()
+    if any(s in bc for s in syns):
+        return True
+    return False
+
+
+def score_roster_heuristic(html: str, url: str, department: str, profile_count: int) -> tuple[int, str]:
+    """
+    Cheap-First Deterministic Heuristic before calling the Agentic LLM Roster Gate:
+    Scores repeated DOM list/card blocks + density of 教授/副教授/讲师/博导/硕导 + CS host/path match.
+    Returns (score, confidence_tier) where confidence_tier is 'HIGH_AUTO_APPROVE' or 'AMBIGUOUS'.
+    """
+    tree = LexborHTMLParser(html or "")
+    text_sample = (tree.text(separator=" ", strip=True) or "")[:12000].lower()
+    title_hits = sum(text_sample.count(w) for w in FACULTY_TITLE_DENSITY_WORDS)
+    list_blocks = len(tree.css("li a[href], tr a[href], .teacher, .faculty, .card"))
+    url_low = (url or "").lower()
+    cs_host_match = any(tok in url_low for tok in CS_HOST_PATH_TOKENS) if is_cs_engineering_department(department) else matches_department_scope(url, html, department)
+
+    score = 0
+    if cs_host_match:
+        score += 2
+    if profile_count >= 5:
+        score += 2
+    elif profile_count >= 3:
+        score += 1
+    if title_hits >= 5:
+        score += 2
+    elif title_hits >= 2:
+        score += 1
+    if list_blocks >= 8:
+        score += 1
+
+    # High-confidence CS/dept faculty roster -> auto-approve without spending an LLM call
+    if cs_host_match and score >= 5 and profile_count >= 3:
+        return score, "HIGH_AUTO_APPROVE"
+    return score, "AMBIGUOUS"
 
 
 def extract_3zone_links_with_meta(
@@ -303,6 +374,8 @@ class SiteTreeBuilder:
             return True
 
     async def _fetch_page(self, client: httpx.AsyncClient, url: str) -> tuple[int, str, str]:
+        t0 = time.perf_counter()
+        dom = current_domain.get() or registrable_domain(urlparse(url).netloc)
         try:
             resp = await client.get(
                 url,
@@ -311,17 +384,129 @@ class SiteTreeBuilder:
                 timeout=15.0,
             )
             st, final_u, html = resp.status_code, str(resp.url), decode_bytes_safely(resp.content)
+            await self.repo.insert_http_fetch_trace(
+                HttpFetchTraceDoc(
+                    trace_id=f"ft_{uuid.uuid4().hex[:12]}",
+                    job_id=current_job_id.get() or "",
+                    domain=dom,
+                    stage="tree_fetch",
+                    url=final_u,
+                    engine="httpx",
+                    status_code=st,
+                    error_detail="" if st == 200 else f"HTTP {st}",
+                    html_bytes=len(resp.content),
+                    markdown_chars=0,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                )
+            )
         except Exception as exc:
-            logger.warning("tree_http_fetch_failed", url=url, error=str(exc))
+            err_s = f"{type(exc).__name__}: {exc}"
+            logger.warning("tree_http_fetch_failed", url=url, error=err_s)
+            await self.repo.insert_http_fetch_trace(
+                HttpFetchTraceDoc(
+                    trace_id=f"ft_{uuid.uuid4().hex[:12]}",
+                    job_id=current_job_id.get() or "",
+                    domain=dom,
+                    stage="tree_fetch",
+                    url=url,
+                    engine="httpx",
+                    status_code=None,
+                    error_detail=err_s,
+                    html_bytes=0,
+                    markdown_chars=0,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                )
+            )
             st, final_u, html = 0, url, ""
 
-        if st in (403, 412, 521) and self.admin.enable_playwright and self.playwright_fetcher is not None:
+        if st in (0, 403, 412, 521) and self.admin.enable_playwright and self.playwright_fetcher is not None:
+            t_pw = time.perf_counter()
             try:
                 st, final_u, html = await self.playwright_fetcher(url)
                 logger.info("tree_playwright_waf_recovered", url=url, status=st)
+                await self.repo.insert_http_fetch_trace(
+                    HttpFetchTraceDoc(
+                        trace_id=f"ft_{uuid.uuid4().hex[:12]}",
+                        job_id=current_job_id.get() or "",
+                        domain=dom,
+                        stage="tree_fetch_pw",
+                        url=final_u,
+                        engine="playwright",
+                        status_code=st,
+                        error_detail="",
+                        html_bytes=len((html or "").encode("utf-8")),
+                        markdown_chars=0,
+                        latency_ms=int((time.perf_counter() - t_pw) * 1000),
+                    )
+                )
             except Exception as exc:
-                logger.warning("tree_playwright_waf_failed", url=url, error=str(exc))
+                logger.warning("tree_playwright_waf_failed", url=url, error=f"{type(exc).__name__}: {exc}")
         return st, final_u, html
+
+    async def _agentic_verify_roster(
+        self,
+        url: str,
+        html: str,
+        department: str,
+        degree: str,
+        profile_urls: list[str],
+    ) -> tuple[bool, str]:
+        """
+        Cheap-First Heuristic -> Agentic LLM Roster Verification Gate:
+        1. Blocks admin/HR URLs and out-of-scope departments deterministically.
+        2. Auto-approves high-confidence CS/dept faculty rosters via DOM + title density heuristic.
+        3. Only calls LLM (`stage='roster_agent_verify'`) on ambiguous pages.
+        """
+        if is_admin_or_hr_url(url):
+            return False, "Blocked admin/HR/undergrad URL"
+        if not matches_department_scope(url, html, department):
+            return False, f"URL/title outside target department scope '{department}'"
+
+        h_score, confidence = score_roster_heuristic(html, url, department, len(profile_urls))
+        if confidence == "HIGH_AUTO_APPROVE":
+            return True, f"cheap_heuristic_auto_approved (score={h_score}, profiles={len(profile_urls)})"
+
+        # Ambiguous page -> ask Agentic LLM Roster Gate
+        tree = LexborHTMLParser(html or "")
+        title_node = tree.css_first("title")
+        page_title = title_node.text(strip=True)[:160] if title_node else ""
+        breadcrumb = extract_breadcrumb_markers(html)[:200]
+        top_links = []
+        for a in tree.css("main a[href], body a[href]")[:40]:
+            txt = re.sub(r"\s+", " ", a.text(separator=" ", strip=True) or "").strip()
+            if txt and len(txt) <= 40:
+                top_links.append(txt)
+            if len(top_links) >= 8:
+                break
+
+        prompt = (
+            f"Verify if this webpage is a REAL faculty/supervisor roster list for department '{department}' ({degree}).\n"
+            f"REJECT university-wide admin/HR pages, news/publications lists, or unrelated departments.\n"
+            f"URL: {url}\n"
+            f"Title: {page_title}\n"
+            f"Breadcrumb: {breadcrumb}\n"
+            f"Sample Links: {top_links}\n\n"
+            f'Return JSON ONLY: {{"is_valid_dept_faculty_roster": true|false, "roster_degree_scope": "masters|phd|all|unknown", "reason": str}}'
+        )
+        llm_res = await self.router.complete(
+            [{"role": "user", "content": prompt}],
+            json_mode=True,
+            max_tokens=150,
+            use_colab=self.admin.enable_colab_bridge,
+            transport=self.transport,
+            stage="roster_agent_verify",
+        )
+        if not llm_res.ok:
+            # If no LLM available (e.g. offline test with empty router), fall back to deterministic dept scope + score >= 3
+            return (h_score >= 3), f"llm_unavailable_fallback (score={h_score})"
+        try:
+            m = re.search(r"\{.*\}", llm_res.data["content"], re.S)
+            parsed = json.loads(m.group(0)) if m else {}
+            is_valid = bool(parsed.get("is_valid_dept_faculty_roster"))
+            reason = str(parsed.get("reason") or ("approved" if is_valid else "rejected_by_agent"))
+            return is_valid, reason
+        except Exception as exc:
+            return False, f"agent_parse_error: {type(exc).__name__}: {exc}"
 
     async def _llm_select_branches(
         self,
@@ -504,12 +689,17 @@ class SiteTreeBuilder:
             ranked_urls = [it["link"] for it in organic[:3]]
 
         for cand_url in ranked_urls:
+            if is_admin_or_hr_url(cand_url):
+                continue
             st, final_u, html = await self._fetch_page(client, cand_url)
             if st != 200:
                 continue
             ok_gate, profiles = verify_roster_html(html, final_u, root_domain=domain, min_profiles=3)
-            logger.info("serper_gate_check", domain=domain, url=final_u, passed=ok_gate, profile_count=len(profiles))
+            agent_ok, agent_reason = (False, "failed_profile_count_gate")
             if ok_gate:
+                agent_ok, agent_reason = await self._agentic_verify_roster(final_u, html, department, degree, profiles)
+            logger.info("serper_gate_check", domain=domain, url=final_u, passed=agent_ok, profile_count=len(profiles), reason=agent_reason)
+            if ok_gate and agent_ok:
                 return StepResult.success({
                     "roster_url": final_u,
                     "department_url": final_u,
@@ -581,6 +771,8 @@ class SiteTreeBuilder:
 
             visited: set[str] = set()
             hops_taken = 0
+            nav_trail: list[dict[str, Any]] = []
+            t_build_start = time.perf_counter()
 
             async def _dfs(
                 cur_url: str,
@@ -599,7 +791,14 @@ class SiteTreeBuilder:
                 st, final_u, html = await self._fetch_page(client, cur_url)
                 if st != 200 or not html:
                     _record_node(cur_url, cur_label, cur_zone, depth, "DEAD_END", parent_url)
+                    nav_trail.append({
+                        "hop": hops_taken, "url": cur_url, "page_title": "", "action": "FETCH_FAILED",
+                        "chosen_link": cur_label, "gate_result": "FAIL", "rejection_reason": f"HTTP {st}",
+                    })
                     return None
+
+                t_node = LexborHTMLParser(html).css_first("title")
+                page_title = t_node.text(strip=True)[:120] if t_node else ""
 
                 zones, page_nav_type = extract_3zone_links_with_meta(html, final_u, clean_dom, department=department)
                 if tree.nav_type == "UNKNOWN" and page_nav_type != "UNKNOWN":
@@ -640,9 +839,16 @@ class SiteTreeBuilder:
                     min_profiles=3,
                     node_type=inferred_node_type,
                 )
-                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, node_type=inferred_node_type, passed=ok_gate, profiles=len(profiles))
+                agent_ok, agent_reason = (False, "below_min_profiles_or_entry_page")
                 if ok_gate:
+                    agent_ok, agent_reason = await self._agentic_verify_roster(final_u, html, department, degree, profiles)
+                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, node_type=inferred_node_type, passed=(ok_gate and agent_ok), profiles=len(profiles), reason=agent_reason)
+                if ok_gate and agent_ok:
                     _record_node(final_u, cur_label, cur_zone, depth, "VERIFIED_ROSTER", parent_url)
+                    nav_trail.append({
+                        "hop": hops_taken, "url": final_u, "page_title": page_title, "action": "VERIFIED_ROSTER",
+                        "chosen_link": cur_label, "gate_result": "PASS", "rejection_reason": agent_reason,
+                    })
                     return {
                         "roster_url": final_u,
                         "department_url": dept_url_seen or final_u,
@@ -650,6 +856,11 @@ class SiteTreeBuilder:
                         "candidate_profile_count": len(profiles),
                         "hops": hops_taken,
                     }
+
+                nav_trail.append({
+                    "hop": hops_taken, "url": final_u, "page_title": page_title, "action": inferred_node_type,
+                    "chosen_link": cur_label, "gate_result": "SKIP_OR_REJECT", "rejection_reason": agent_reason,
+                })
 
                 # Detect Schools/Colleges directory (院系设置) and harvest ALL departments into departments_map
                 if is_schools_dir:
@@ -722,9 +933,15 @@ class SiteTreeBuilder:
                     winner = serp_res.data
                     _record_node(winner["roster_url"], f"{department} Roster (Serper)", "BODY", 1, "VERIFIED_ROSTER", root_url)
 
-            # Persist pruned tree (even if no winner, save departments_map & pruned skeleton)
+            # Persist pruned tree + navigation_trail + per-university token_stats
             tree.nodes = list(nodes_by_url.values())
             tree.markdown_tree = render_markdown_tree(tree.nodes)
+            if nav_trail:
+                tree.navigation_trail = nav_trail
+            elapsed_sec = round(time.perf_counter() - t_build_start, 2)
+            tok_stats = await self.repo.aggregate_domain_tokens(clean_dom, job_id=current_job_id.get() or None)
+            tok_stats["elapsed_sec"] = elapsed_sec
+            tree.token_stats = tok_stats
             if winner:
                 tree.verified_rosters[roster_key] = VerifiedRosterEntry(
                     roster_url=winner["roster_url"],

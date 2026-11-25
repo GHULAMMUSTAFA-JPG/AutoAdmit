@@ -1,13 +1,17 @@
 """Idempotent async CRUD repositories for permanent MongoDB collections."""
 
+import re
 from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.schemas.entities import (
     ApiCallTraceDoc,
+    BenchmarkRunDoc,
+    HttpFetchTraceDoc,
     JobDoc,
     NeedsReviewDoc,
     PageSnapshotDoc,
+    Phase2LinkAuditDoc,
     ProfessorDoc,
     UniversityDeptDoc,
     UniversitySeed,
@@ -94,6 +98,13 @@ class Repository:
             {"$set": prof.model_dump()},
             upsert=True,
         )
+
+    async def get_professor_by_url(self, canonical_profile_url: str) -> ProfessorDoc | None:
+        doc = await self.db["professors"].find_one({"canonical_profile_url": canonical_profile_url})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return ProfessorDoc(**doc)
 
     async def list_professors_by_roster(self, source_roster_url: str) -> list[ProfessorDoc]:
         cursor = self.db["professors"].find({"source_roster_url": source_roster_url})
@@ -243,41 +254,38 @@ class Repository:
         if job_id:
             query["job_id"] = job_id.strip()
 
-        providers_init = {
-            p: {
+        def _empty_bucket(p: str) -> dict[str, Any]:
+            return {
                 "provider": p,
                 "total_calls": 0,
                 "ok_count": 0,
                 "failed_count": 0,
                 "avg_latency_ms": 0.0,
                 "max_latency_ms": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
                 "last_error": None,
                 "_lat_sum": 0,
             }
-            for p in ("colab_qwen", "deepseek", "gemini", "serper")
-        }
+
+        providers_init = {p: _empty_bucket(p) for p in ("colab_qwen", "deepseek", "gemini", "serper")}
         failure_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
 
         cursor = self.db["api_call_traces"].find(query).sort("created_at", -1)
         async for doc in cursor:
             prov = str(doc.get("provider") or "unknown").lower()
             if prov not in providers_init:
-                providers_init[prov] = {
-                    "provider": prov,
-                    "total_calls": 0,
-                    "ok_count": 0,
-                    "failed_count": 0,
-                    "avg_latency_ms": 0.0,
-                    "max_latency_ms": 0,
-                    "last_error": None,
-                    "_lat_sum": 0,
-                }
+                providers_init[prov] = _empty_bucket(prov)
             bucket = providers_init[prov]
             st = str(doc.get("status") or "ok")
             lat = int(doc.get("latency_ms") or 0)
             err = str(doc.get("error_detail") or "")
             bucket["total_calls"] += 1
             bucket["_lat_sum"] += lat
+            bucket["prompt_tokens"] += int(doc.get("prompt_tokens") or 0)
+            bucket["completion_tokens"] += int(doc.get("completion_tokens") or 0)
+            bucket["total_tokens"] += int(doc.get("total_tokens") or 0)
             if lat > bucket["max_latency_ms"]:
                 bucket["max_latency_ms"] = lat
             if st == "ok":
@@ -286,12 +294,14 @@ class Repository:
                 bucket["failed_count"] += 1
                 if bucket["last_error"] is None:
                     bucket["last_error"] = {"status": st, "http_status": doc.get("http_status"), "detail": err[:240]}
-                gk = (prov, st, err[:160])
+                # Strip dynamic retry timers (e.g. 'in 6s', 'in 12.5s') so identical 429s collapse cleanly
+                norm_err = re.sub(r"\bin\s+\d+(?:\.\d+)?\s*s\b", "in <N>s", err, flags=re.I)[:160]
+                gk = (prov, st, norm_err)
                 if gk not in failure_groups:
                     failure_groups[gk] = {
                         "provider": prov,
                         "status": st,
-                        "error_detail": err[:160],
+                        "error_detail": norm_err,
                         "count": 0,
                     }
                 failure_groups[gk]["count"] += 1
@@ -309,6 +319,92 @@ class Repository:
             "providers": providers_out,
             "failure_breakdown": failures_sorted,
         }
+
+    async def aggregate_domain_tokens(self, domain: str, *, job_id: str | None = None) -> dict[str, int]:
+        query: dict[str, Any] = {"domain": domain.lower().strip()}
+        if job_id:
+            query["job_id"] = job_id.strip()
+        stats = {"total_tokens": 0, "qwen_tokens": 0, "deepseek_tokens": 0, "gemini_tokens": 0}
+        async for doc in self.db["api_call_traces"].find(query):
+            tok = int(doc.get("total_tokens") or 0)
+            stats["total_tokens"] += tok
+            prov = str(doc.get("provider") or "").lower()
+            if prov == "colab_qwen":
+                stats["qwen_tokens"] += tok
+            elif prov == "deepseek":
+                stats["deepseek_tokens"] += tok
+            elif prov == "gemini":
+                stats["gemini_tokens"] += tok
+        return stats
+
+    # ------------------------------------------------------------------ benchmark_runs
+    async def insert_benchmark_run(self, run: BenchmarkRunDoc) -> None:
+        await self.db["benchmark_runs"].update_one(
+            {"run_id": run.run_id},
+            {"$set": run.model_dump()},
+            upsert=True,
+        )
+
+    async def list_benchmark_runs(self, limit: int = 50) -> list[BenchmarkRunDoc]:
+        cursor = self.db["benchmark_runs"].find({}).sort("created_at", -1).limit(limit)
+        out: list[BenchmarkRunDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(BenchmarkRunDoc(**doc))
+        return out
+
+    # ------------------------------------------------------------------ http_fetch_traces & phase2_link_audits
+    async def insert_http_fetch_trace(self, trace: HttpFetchTraceDoc) -> None:
+        await self.db["http_fetch_traces"].update_one(
+            {"trace_id": trace.trace_id},
+            {"$set": trace.model_dump()},
+            upsert=True,
+        )
+
+    async def list_http_fetch_traces(self, *, job_id: str | None = None, domain: str | None = None, limit: int = 500) -> list[HttpFetchTraceDoc]:
+        query: dict[str, Any] = {}
+        if job_id:
+            query["job_id"] = job_id.strip()
+        if domain:
+            query["domain"] = domain.lower().strip()
+        cursor = self.db["http_fetch_traces"].find(query).sort("created_at", -1).limit(limit)
+        out: list[HttpFetchTraceDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(HttpFetchTraceDoc(**doc))
+        return out
+
+    async def insert_phase2_link_audit(self, audit: Phase2LinkAuditDoc) -> None:
+        await self.db["phase2_link_audits"].update_one(
+            {"audit_id": audit.audit_id},
+            {"$set": audit.model_dump()},
+            upsert=True,
+        )
+
+    async def list_phase2_link_audits(self, *, job_id: str | None = None, domain: str | None = None, limit: int = 200) -> list[Phase2LinkAuditDoc]:
+        query: dict[str, Any] = {}
+        if job_id:
+            query["job_id"] = job_id.strip()
+        if domain:
+            query["domain"] = domain.lower().strip()
+        cursor = self.db["phase2_link_audits"].find(query).sort("created_at", -1).limit(limit)
+        out: list[Phase2LinkAuditDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(Phase2LinkAuditDoc(**doc))
+        return out
+
+    # ------------------------------------------------------------------ system_state (persisted runtime config)
+    async def set_system_state(self, key: str, value: Any) -> None:
+        await self.db["system_state"].update_one(
+            {"key": key},
+            {"$set": {"key": key, "value": value, "updated_at": utc_now()}},
+            upsert=True,
+        )
+
+    async def get_system_state(self, key: str) -> Any:
+        doc = await self.db["system_state"].find_one({"key": key})
+        return doc.get("value") if doc else None
 
     async def get_system_summary(self) -> dict[str, int]:
         return {

@@ -74,6 +74,8 @@ class JobDoc(BaseModel):
     job_id: str
     request: dict[str, Any] = Field(default_factory=dict)
     status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"] = "QUEUED"
+    queue_mode: str = "PARALLEL_5X"
+    active_concurrency: int = 5
     target_domains: list[str] = Field(default_factory=list)
     completed_domains: list[str] = Field(default_factory=list)
     university_details: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -91,6 +93,7 @@ class NeedsReviewDoc(BaseModel):
     error_code: str
     detail: str
     payload: dict[str, Any] = Field(default_factory=dict)
+    grounding_audit: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -115,7 +118,7 @@ class VerifiedRosterEntry(BaseModel):
 
 
 class UniversitySiteTreeDoc(BaseModel):
-    """Permanent pruned site hierarchy + department map + verified rosters in `university_site_trees`."""
+    """Permanent pruned site hierarchy + department map + verified rosters + navigation trail in `university_site_trees`."""
     domain: str
     root_url: str
     nav_type: Literal["SEMANTIC_NAV", "DIV_BASED_NAV", "UNKNOWN"] = "UNKNOWN"
@@ -123,11 +126,13 @@ class UniversitySiteTreeDoc(BaseModel):
     nodes: list[SiteTreeNode] = Field(default_factory=list)
     departments_map: dict[str, str] = Field(default_factory=dict)
     verified_rosters: dict[str, VerifiedRosterEntry] = Field(default_factory=dict)
+    navigation_trail: list[dict[str, Any]] = Field(default_factory=list)
+    token_stats: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
 class ApiCallTraceDoc(BaseModel):
-    """Per-attempt LLM / Serper API latency and breakage trace in `api_call_traces`."""
+    """Per-attempt LLM / Serper API latency, token ledger, and breakage trace in `api_call_traces`."""
     trace_id: str
     job_id: str = ""
     domain: str = ""
@@ -139,6 +144,60 @@ class ApiCallTraceDoc(BaseModel):
     http_status: int | None = None
     error_detail: str = ""
     latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    system_prompt_tokens: int = 0
+    page_content_tokens: int = 0
+    original_markdown_tokens: int = 0
+    sent_markdown_tokens: int = 0
     request_payload: str = ""
     response_payload: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class BenchmarkRunDoc(BaseModel):
+    """Stress-benchmark run summary persisted in `benchmark_runs`."""
+    run_id: str
+    provider: str
+    model: str = ""
+    concurrency: int = 1
+    payload_size: str = "nav_500"
+    batch_size: int = 5
+    avg_input_tokens: float = 0.0
+    avg_output_tokens: float = 0.0
+    total_time_ms: int = 0
+    avg_latency_ms: float = 0.0
+    max_latency_ms: int = 0
+    requests_per_min: float = 0.0
+    ok_count: int = 0
+    fail_count: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class HttpFetchTraceDoc(BaseModel):
+    """Per-fetch HTTP/Playwright diagnostic record in `http_fetch_traces`."""
+    trace_id: str
+    job_id: str = ""
+    domain: str = ""
+    stage: str = ""
+    url: str
+    engine: Literal["httpx", "playwright"] = "httpx"
+    status_code: int | None = None
+    error_detail: str = ""
+    html_bytes: int = 0
+    markdown_chars: int = 0
+    latency_ms: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class Phase2LinkAuditDoc(BaseModel):
+    """Per-roster Phase 2A link filtering breakdown in `phase2_link_audits`."""
+    audit_id: str
+    job_id: str = ""
+    domain: str = ""
+    roster_url: str
+    total_links: int = 0
+    kept_count: int = 0
+    dropped_breakdown: dict[str, int] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)

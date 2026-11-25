@@ -2,6 +2,7 @@
 
 const state = {
   universities: [],
+  reviewItems: [],
   activeTab: "tab-trees",
   activeJobId: null,
   pollTimer: null,
@@ -89,6 +90,22 @@ function downloadFilteredProfessors(fmt = "csv") {
   downloadProfessors(dom, fmt);
 }
 
+function downloadDebugBundle() {
+  const jid = (document.getElementById("analytics-job-id")?.value || state.activeJobId || "").trim();
+  const q = jid ? `?job_id=${encodeURIComponent(jid)}` : "";
+  window.location.href = `/api/v1/export/debug-bundle${q}`;
+  showToast("Downloading full Debug Bundle JSON...");
+}
+
+function updateQueueModeBadge(qs) {
+  const el = document.getElementById("hdr-queue-badge");
+  if (!el || !qs) return;
+  const mode = qs.queue_mode || "PARALLEL_5X";
+  const conc = qs.active_concurrency ?? 5;
+  el.textContent = `${mode} (${conc}x)`;
+  el.className = `p12-badge ${mode.includes("THROTTLED") ? "p12-badge-warn" : "p12-badge-ok"}`;
+}
+
 // =========================================================================
 // System Summary & Universities Overview (Tab 1)
 // =========================================================================
@@ -107,6 +124,7 @@ async function loadSystemSummary() {
     document.getElementById("tab-count-analytics").textContent = d.api_call_traces ?? 0;
     document.getElementById("hdr-summary-text").textContent =
       `${d.universities ?? 0} Unis · ${d.professors ?? 0} Profs · ${d.needs_review ?? 0} Review`;
+    if (d.queue_state) updateQueueModeBadge(d.queue_state);
   } catch (e) {
     console.error("Summary load error:", e);
   }
@@ -190,7 +208,10 @@ function renderUniversitiesTable() {
           ${errHtml}
         </td>
         <td style="max-width:260px;">${rosterHtml}</td>
-        <td><strong>${esc(u.departments_mapped_count ?? 0)}</strong></td>
+        <td>
+          <strong>${esc(u.departments_mapped_count ?? 0)}</strong> depts
+          <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${esc((u.token_stats && u.token_stats.total_tokens) ? `${u.token_stats.total_tokens} tok · ${u.token_stats.elapsed_sec ?? 0}s` : "—")}</div>
+        </td>
         <td><strong style="color:${profCount > 0 ? "var(--accent-green)" : "var(--text-muted)"};">${esc(profCount)}</strong></td>
         <td>
           <div style="display:flex; gap:4px; flex-wrap:wrap;">
@@ -263,6 +284,7 @@ async function buildTreesOnly(btn) {
 // Step 2: Extract Professors from Verified Trees
 async function extractFromVerifiedTrees(btn) {
   const { country, regions, department, degree, tier } = readFilters();
+  const force_reextract = Boolean(document.getElementById("f-force-reextract")?.checked);
   const statusMsg = document.getElementById("job-status-msg");
   btn.disabled = true;
   if (statusMsg) statusMsg.textContent = "Starting Step 2: Extract Professors from Verified Trees...";
@@ -270,7 +292,7 @@ async function extractFromVerifiedTrees(btn) {
     const res = await fetch("/api/v1/trees/extract", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ country, regions, department, degree, tier })
+      body: JSON.stringify({ country, regions, department, degree, tier, force_reextract })
     });
     const body = await res.json();
     if (!res.ok) {
@@ -340,6 +362,9 @@ function startJobPolling(jobId) {
         hdrBadge.textContent = `${job.job_id}: ${completed}/${total} (${job.status})`;
         hdrBadge.className = `p12-badge ${job.status === "COMPLETED" ? "p12-badge-ok" : "p12-badge-info"}`;
       }
+      if (job.queue_mode) {
+        updateQueueModeBadge({ queue_mode: job.queue_mode, active_concurrency: job.active_concurrency });
+      }
       document.getElementById("banner-job-title").textContent =
         `Job ${job.job_id} — ${job.status} (${completed}/${total} universities completed)`;
       document.getElementById("banner-job-scorecard").textContent =
@@ -392,11 +417,20 @@ async function viewSiteTree(domain) {
     const d = await res.json();
     badge.textContent = d.nav_type || "UNKNOWN";
     badge.className = `p12-badge ${d.nav_type === "SEMANTIC_NAV" ? "p12-badge-info" : d.nav_type === "DIV_BASED_NAV" ? "p12-badge-purple" : "p12-badge-muted"}`;
+    const ts = d.token_stats || {};
+    const tokEl = document.getElementById("site-tree-tokens");
+    if (tokEl) {
+      tokEl.textContent = `Tokens: ${ts.total_tokens ?? 0} total (Qwen: ${ts.qwen_tokens ?? 0}, DeepSeek: ${ts.deepseek_tokens ?? 0}, Gemini: ${ts.gemini_tokens ?? 0}) · Elapsed: ${ts.elapsed_sec ?? 0}s`;
+    }
     mdEl.textContent = d.markdown_tree || "(empty tree)";
     deptEl.textContent = JSON.stringify({
       verified_rosters: d.verified_rosters || {},
       departments_map: d.departments_map || {}
     }, null, 2);
+    const trailEl = document.getElementById("site-tree-trail");
+    if (trailEl) {
+      trailEl.textContent = JSON.stringify(d.navigation_trail || [], null, 2);
+    }
   } catch (e) {
     mdEl.textContent = `Error: ${e.message}`;
   }
@@ -492,24 +526,47 @@ async function loadNeedsReview() {
     const res = await fetch(`/api/v1/needs-review?${params.toString()}`);
     if (!res.ok) return;
     const items = await res.json();
+    state.reviewItems = items;
     document.getElementById("tab-count-review").textContent = items.length;
     const tbody = document.getElementById("review-table-body");
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No items in needs_review.</td></tr>`;
       return;
     }
-    tbody.innerHTML = items.map(it => `
+    tbody.innerHTML = items.map((it, idx) => `
       <tr>
         <td><code>${esc(it.domain)}</code></td>
         <td><span class="p12-badge p12-badge-muted">${esc(it.stage)}</span></td>
         <td><span class="p12-badge p12-badge-err">${esc(it.error_code)}</span></td>
         <td style="font-size:12px; max-width:340px;">${esc(it.detail)}</td>
         <td style="max-width:240px; word-break:break-all;">${it.url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" style="color:var(--primary); font-size:11.5px;">${esc(it.url)}</a>` : "—"}</td>
+        <td><button class="btn btn-secondary btn-sm" onclick="inspectReviewAudit(${idx})">Inspect</button></td>
       </tr>
     `).join("");
   } catch (e) {
     console.error("Needs review load error:", e);
   }
+}
+
+function inspectReviewAudit(idx) {
+  const it = state.reviewItems[idx];
+  if (!it) return;
+  const modal = document.getElementById("audit-modal-backdrop");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.getElementById("audit-modal-title").textContent = `${it.domain} · ${it.error_code}`;
+  document.getElementById("audit-modal-meta").textContent = `Stage: ${it.stage} · URL: ${it.url || "-"} · ${it.detail}`;
+  const ga = it.grounding_audit || {};
+  document.getElementById("audit-modal-llm").textContent = JSON.stringify({
+    extracted_quotes: ga.extracted_quotes || {},
+    raw_llm_output: ga.raw_llm_output || "(not recorded)",
+    payload: it.payload || {}
+  }, null, 2);
+  document.getElementById("audit-modal-md").textContent = ga.markdown_excerpt || "(no markdown excerpt saved)";
+}
+
+function closeAuditModal() {
+  document.getElementById("audit-modal-backdrop")?.classList.add("hidden");
 }
 
 // =========================================================================
@@ -535,17 +592,36 @@ async function loadAnalytics() {
   if (statusFilter) trParams.set("status", statusFilter);
 
   try {
-    const [ovRes, trRes] = await Promise.all([
+    const [ovRes, trRes, gpuRes, benchRes] = await Promise.all([
       fetch(`/api/v1/analytics/overview?${ovParams.toString()}`),
-      fetch(`/api/v1/analytics/traces?${trParams.toString()}`)
+      fetch(`/api/v1/analytics/traces?${trParams.toString()}`),
+      fetch("/api/v1/analytics/colab-gpu"),
+      fetch("/api/v1/analytics/benchmarks")
     ]);
+    if (gpuRes.ok) {
+      const g = await gpuRes.json();
+      const pill = document.getElementById("colab-gpu-pill");
+      if (pill) {
+        if (g.loaded) {
+          pill.className = "p12-badge p12-badge-ok";
+          pill.textContent = `Live GPU (${g.engine || "vllm"}): ${g.vram_used_mb ?? g.vram_allocated_mb ?? 0}/${g.vram_total_mb ?? 0} MB · Active: ${g.active_requests ?? 0}`;
+        } else {
+          pill.className = "p12-badge p12-badge-err";
+          pill.textContent = `Colab GPU: ${g.status || "offline"}`;
+        }
+      }
+    }
+    if (benchRes.ok) {
+      renderBenchmarkHistory(await benchRes.json());
+    }
     if (ovRes.ok) {
       const ov = await ovRes.json();
+      if (ov.queue_state) updateQueueModeBadge(ov.queue_state);
       const cardsEl = document.getElementById("analytics-provider-cards");
       const order = ["colab_qwen", "deepseek", "gemini", "serper"];
       let totalCalls = 0;
       cardsEl.innerHTML = order.map(key => {
-        const p = (ov.providers || {})[key] || { total_calls: 0, ok_count: 0, failed_count: 0, avg_latency_ms: 0, max_latency_ms: 0, last_error: null };
+        const p = (ov.providers || {})[key] || { total_calls: 0, ok_count: 0, failed_count: 0, avg_latency_ms: 0, max_latency_ms: 0, total_tokens: 0, last_error: null };
         totalCalls += p.total_calls;
         const hasErr = p.failed_count > 0;
         const statusBadge = p.total_calls === 0
@@ -567,6 +643,7 @@ async function loadAnalytics() {
               <div>OK / Fail: <strong style="color:var(--accent-green);">${p.ok_count}</strong> / <strong style="color:${hasErr ? "var(--accent-red)" : "var(--text-muted)"};">${p.failed_count}</strong></div>
               <div>Avg: <strong>${p.avg_latency_ms} ms</strong></div>
               <div>Max: <strong>${p.max_latency_ms} ms</strong></div>
+              <div style="grid-column:span 2;">Tokens: <strong>${p.total_tokens ?? 0}</strong></div>
             </div>
             ${errBox}
           </div>
@@ -602,7 +679,7 @@ async function loadAnalytics() {
               <td><strong>${esc(t.provider)}</strong><div style="font-size:11px; color:var(--text-muted);">${esc(t.model)}</div></td>
               <td><span class="p12-badge p12-badge-muted">${esc(t.stage || "-")}</span><div style="font-size:11px; color:var(--text-secondary);">${esc(t.domain || "-")}</div></td>
               <td><span class="p12-badge ${stCls}">${esc(t.status)}</span></td>
-              <td style="font-family:var(--font-mono);"><strong>${esc(t.latency_ms)} ms</strong></td>
+              <td style="font-family:var(--font-mono);"><strong>${esc(t.latency_ms)} ms</strong><div style="font-size:10.5px; color:var(--text-muted);">${esc(t.total_tokens ?? 0)} tok</div></td>
               <td style="font-size:11.5px; color:var(--text-secondary); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(t.error_detail || "OK (click to inspect)")}</td>
             </tr>
           `;
@@ -611,6 +688,56 @@ async function loadAnalytics() {
     }
   } catch (e) {
     console.error("Analytics load error:", e);
+  }
+}
+
+function renderBenchmarkHistory(runs) {
+  const tbody = document.getElementById("benchmark-history-body");
+  if (!tbody) return;
+  if (!runs || !runs.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:14px;">No benchmark runs yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = runs.map((r, i) => `
+    <tr>
+      <td><code>#${runs.length - i} (${esc(r.run_id)})</code></td>
+      <td><strong>${esc(r.provider)}</strong><div style="font-size:11px; color:var(--text-muted);">${esc(r.model)}</div></td>
+      <td><span class="p12-badge p12-badge-info">${esc(r.concurrency)}x</span> <span class="p12-badge p12-badge-muted">${esc(r.payload_size)}</span></td>
+      <td style="font-family:var(--font-mono);">${esc(r.avg_input_tokens)} / ${esc(r.avg_output_tokens)}</td>
+      <td style="font-family:var(--font-mono);">${esc((r.total_time_ms / 1000).toFixed(2))}s</td>
+      <td style="font-family:var(--font-mono);">${esc(r.avg_latency_ms)} / ${esc(r.max_latency_ms)} ms</td>
+      <td style="font-family:var(--font-mono);"><strong style="color:var(--accent-green);">${esc(r.requests_per_min)} req/m</strong></td>
+      <td style="font-family:var(--font-mono);">${esc(r.ok_count)} / <span style="color:${r.fail_count ? "var(--accent-red)" : "var(--text-muted)"};">${esc(r.fail_count)}</span></td>
+    </tr>
+  `).join("");
+}
+
+async function runStressBenchmark(btn) {
+  const provider = document.getElementById("bench-provider")?.value || "colab_qwen";
+  const concurrency = parseInt(document.getElementById("bench-concurrency")?.value || "2", 10);
+  const payload_size = document.getElementById("bench-payload")?.value || "nav_500";
+  const batch_size = parseInt(document.getElementById("bench-batch")?.value || "5", 10);
+  const msg = document.getElementById("bench-status-msg");
+  btn.disabled = true;
+  if (msg) msg.textContent = `Running ${batch_size} requests on ${provider} (conc=${concurrency}, ${payload_size})...`;
+  try {
+    const res = await fetch("/api/v1/analytics/benchmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, concurrency, payload_size, batch_size })
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      if (msg) msg.textContent = `Benchmark failed: ${d.detail || JSON.stringify(d)}`;
+      return;
+    }
+    if (msg) msg.textContent = `Done (${d.run_id}): ${d.ok_count}/${d.batch_size} OK · Avg ${d.avg_latency_ms}ms · ${d.requests_per_min} req/min`;
+    showToast(`Benchmark done: ${d.requests_per_min} req/min (${d.ok_count}/${d.batch_size} OK)`);
+    await loadAnalytics();
+  } catch (e) {
+    if (msg) msg.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
   }
 }
 

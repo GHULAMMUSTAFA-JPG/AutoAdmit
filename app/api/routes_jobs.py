@@ -210,6 +210,7 @@ async def list_universities_overview(request: Request):
             "nav_type": t.nav_type if t else "UNKNOWN",
             "departments_mapped_count": len(t.departments_map) if t else 0,
             "verified_rosters_count": len(t.verified_rosters) if t else 0,
+            "token_stats": t.token_stats if t else {},
             "winning_strategy": d.winning_strategy if d else "PENDING",
             "faculty_roster_url": roster_url,
             "department_url": d.department_url if d else None,
@@ -341,8 +342,55 @@ async def export_professors_data(
     )
 
 
+@router.get("/export/debug-bundle")
+async def export_debug_bundle(
+    request: Request,
+    job_id: str | None = Query(None),
+):
+    """Exports a comprehensive JSON Debug Bundle containing job metadata, API traces, HTTP fetch traces, link audits, navigation trails, professors, and needs_review grounding audits."""
+    repo = _get_repo(request)
+    job_doc = await repo.get_job(job_id) if job_id else None
+    api_traces = await repo.list_api_call_traces(job_id=job_id, limit=500)
+    http_traces = await repo.list_http_fetch_traces(job_id=job_id, limit=500)
+    link_audits = await repo.list_phase2_link_audits(job_id=job_id, limit=200)
+    trees = await repo.list_site_trees(limit=500)
+    profs = await repo.list_professors()
+    reviews = await repo.list_needs_review(limit=500)
+
+    bundle = {
+        "job_id": job_id,
+        "job": job_doc.model_dump(mode="json") if job_doc else None,
+        "api_call_traces": [t.model_dump(mode="json") for t in api_traces],
+        "http_fetch_traces": [t.model_dump(mode="json") for t in http_traces],
+        "phase2_link_audits": [a.model_dump(mode="json") for a in link_audits],
+        "university_site_trees": [
+            {
+                "domain": t.domain,
+                "nav_type": t.nav_type,
+                "departments_mapped_count": len(t.departments_map),
+                "verified_rosters": {k: v.model_dump(mode="json") for k, v in t.verified_rosters.items()},
+                "navigation_trail": t.navigation_trail,
+                "token_stats": t.token_stats,
+            }
+            for t in trees
+        ],
+        "professors": [p.model_dump(mode="json") for p in profs],
+        "needs_review": [r.model_dump(mode="json") for r in reviews],
+    }
+    safe_name = f"debug_bundle_{job_id}.json" if job_id else "debug_bundle_latest.json"
+    content = json.dumps(bundle, ensure_ascii=False, indent=2)
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
 @router.get("/system/summary")
 async def get_system_summary(request: Request):
     """Fast indexed count_documents() summary."""
     repo = _get_repo(request)
-    return await repo.get_system_summary()
+    from app.core.llm_router import llm_router
+    summary = await repo.get_system_summary()
+    summary["queue_state"] = llm_router.get_queue_state()
+    return summary

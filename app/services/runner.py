@@ -5,6 +5,7 @@ from collections import Counter
 import uuid
 from typing import Any
 
+from app.core.llm_router import llm_router
 from app.core.logging import current_domain, current_job_id, get_logger
 from app.db.repositories import Repository
 from app.schemas.entities import JobDoc, UniversityDeptDoc, utc_now
@@ -111,16 +112,26 @@ class PipelineRunner:
                 else:
                     logger.info("runner_skip_completed", job_id=jid, domain=d)
 
+            active_workers = 0
+            slot_cond = asyncio.Condition()
+
             async def _worker() -> None:
+                nonlocal active_workers
                 while not work_queue.empty():
-                    try:
-                        dom = work_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
+                    async with slot_cond:
+                        while active_workers >= min(self._get_concurrency(), max(1, llm_router.active_concurrency)):
+                            await slot_cond.wait_for(lambda: active_workers < min(self._get_concurrency(), max(1, llm_router.active_concurrency)))
+                        try:
+                            dom = work_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        active_workers += 1
                     dom_token = current_domain.set(dom)
                     try:
                         logger.info("university_started", job_id=jid, domain=dom, department=department, degree=degree)
                         job.university_details[dom]["status"] = "RUNNING"
+                        job.queue_mode = llm_router.queue_mode
+                        job.active_concurrency = min(self._get_concurrency(), max(1, llm_router.active_concurrency))
 
                         p1_res = await self.phase1.discover(dom, department, degree)
                         uni_found = 0
@@ -149,6 +160,7 @@ class PipelineRunner:
                                     logger.warning("phase2_crawl_failed", job_id=jid, domain=dom, error_code=crawl_res.error_code, detail=crawl_res.detail)
                                 else:
                                     prof_urls = crawl_res.data["profile_urls"]
+                                    roster_title = crawl_res.data.get("roster_title", "")
                                     uni_found = len(prof_urls)
                                     logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found, used_playwright=crawl_res.data.get("used_playwright", False))
 
@@ -159,7 +171,7 @@ class PipelineRunner:
                                             continue
                                         uni_attempts += 1
                                         ext_res = await self.extractor.extract_from_snapshot(
-                                            snap_res.data, department=department, source_roster_url=roster_url
+                                            snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
                                         )
                                         if ext_res.ok:
                                             uni_verified += 1
@@ -216,6 +228,8 @@ class PipelineRunner:
                             if uni_err:
                                 job.errors.append(uni_err)
                                 job.scorecard["failures"] = job.scorecard.get("failures", 0) + 1
+                            job.queue_mode = llm_router.queue_mode
+                            job.active_concurrency = min(self._get_concurrency(), max(1, llm_router.active_concurrency))
                             if dom not in job.completed_domains:
                                 job.completed_domains.append(dom)
                             await self.repo.upsert_job(job)
@@ -223,6 +237,9 @@ class PipelineRunner:
                     finally:
                         current_domain.reset(dom_token)
                         work_queue.task_done()
+                        async with slot_cond:
+                            active_workers = max(0, active_workers - 1)
+                            slot_cond.notify_all()
 
             worker_count = min(self._get_concurrency(), max(1, work_queue.qsize()))
             await asyncio.gather(*[_worker() for _ in range(worker_count)])
