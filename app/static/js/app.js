@@ -123,6 +123,21 @@ function populateDomainSelects(universities) {
       domains.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
     if (domains.includes(current)) sel.value = current;
   }
+
+  // Populate Region dropdown dynamically with university counts
+  const regSel = document.getElementById("f-regions");
+  if (regSel && regSel.tagName === "SELECT") {
+    const currentReg = regSel.value;
+    const counts = {};
+    universities.forEach(u => {
+      const r = (u.region || "").trim();
+      if (r) counts[r] = (counts[r] || 0) + 1;
+    });
+    const regions = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+    regSel.innerHTML = `<option value="">All Regions (${universities.length} unis)</option>` +
+      regions.map(r => `<option value="${esc(r)}">${esc(r)} (${counts[r]})</option>`).join("");
+    if (regions.includes(currentReg)) regSel.value = currentReg;
+  }
 }
 
 async function loadUniversitiesOverview() {
