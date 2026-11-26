@@ -170,9 +170,33 @@ async function loadUniversitiesOverview() {
   }
 }
 
+function getSelectedRegion() {
+  return (document.getElementById("f-regions")?.value || "").trim().toLowerCase();
+}
+
+function getSelectedRegionDomains() {
+  const reg = getSelectedRegion();
+  if (!reg) return null;
+  const set = new Set();
+  for (const u of state.universities || []) {
+    if ((u.region || "").trim().toLowerCase() === reg) {
+      set.add((u.domain || "").toLowerCase());
+    }
+  }
+  return set;
+}
+
+function onRegionFilterChange() {
+  renderUniversitiesTable();
+  loadProfessors();
+  loadNeedsReview();
+}
+
 function renderUniversitiesTable() {
   const q = (document.getElementById("uni-search")?.value || "").trim().toLowerCase();
+  const selectedRegion = getSelectedRegion();
   const rows = state.universities.filter(u => {
+    if (selectedRegion && (u.region || "").trim().toLowerCase() !== selectedRegion) return false;
     if (!q) return true;
     return `${u.name || ""} ${u.chinese_name || ""} ${u.domain || ""} ${u.region || ""}`.toLowerCase().includes(q);
   });
@@ -462,7 +486,11 @@ async function loadProfessors() {
   try {
     const res = await fetch(`/api/v1/professors?${params.toString()}`);
     if (!res.ok) return;
-    const profs = await res.json();
+    let profs = await res.json();
+    const regionDomains = getSelectedRegionDomains();
+    if (regionDomains) {
+      profs = profs.filter(p => regionDomains.has((p.university_domain || "").toLowerCase()));
+    }
     document.getElementById("tab-count-profs").textContent = profs.length;
     const tbody = document.getElementById("prof-table-body");
     if (!profs.length) {
@@ -525,7 +553,11 @@ async function loadNeedsReview() {
   try {
     const res = await fetch(`/api/v1/needs-review?${params.toString()}`);
     if (!res.ok) return;
-    const items = await res.json();
+    let items = await res.json();
+    const regionDomains = getSelectedRegionDomains();
+    if (regionDomains) {
+      items = items.filter(it => regionDomains.has((it.domain || "").toLowerCase()));
+    }
     state.reviewItems = items;
     document.getElementById("tab-count-review").textContent = items.length;
     const tbody = document.getElementById("review-table-body");
