@@ -100,8 +100,11 @@ def registrable_domain(host: str) -> str:
 
 
 def is_same_root_domain(url: str, root_domain: str) -> bool:
-    """Allows same-root academic subdomains (e.g. cs.tsinghua.edu.cn) while blocking external domains (e.g. 720yun.com)."""
-    host = urlparse(url).netloc.lower().split(":")[0]
+    """Allows same-root academic subdomains while blocking external domains and safely rejecting malformed URLs."""
+    try:
+        host = urlparse(url).netloc.lower().split(":")[0]
+    except ValueError:
+        return False
     target_root = registrable_domain(root_domain)
     if not host or not target_root:
         return False
@@ -249,28 +252,34 @@ def extract_profile_urls_with_audit(
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
             dropped["other_denied"] += 1
             continue
-        abs_url = urljoin(base_url, href).split("#")[0]
+        try:
+            abs_url = urljoin(base_url, href).split("#")[0]
+            parsed_u = urlparse(abs_url)
+            _ = parsed_u.netloc
+        except ValueError:
+            dropped["other_denied"] += 1
+            continue
         if abs_url in seen or abs_url.rstrip("/") == base_url.rstrip("/"):
             continue
         if expected_root and not is_same_root_domain(abs_url, expected_root):
             dropped["other_denied"] += 1
             continue
 
-        parsed_u = urlparse(abs_url)
         path_low = (parsed_u.path or "/").lower()
         url_low = abs_url.lower()
+        text = re.sub(r"\s+", " ", a.text(separator=" ", strip=True) or a.attributes.get("title") or "").strip()
 
         if path_low.endswith(("/list.htm", "/list.html", "/list.jsp")):
             dropped["list_index"] += 1
             continue
-        if NEWS_DATE_PATH_RE.search(path_low):
+        # Only drop date-prefixed URLs if anchor text is NOT a plausible professor name (preserves WebPlus cXXXXaYYYY/page.htm bios)
+        if NEWS_DATE_PATH_RE.search(path_low) and not is_plausible_person_name(text):
             dropped["news_date"] += 1
             continue
         if any(slug in url_low for slug in ADMIN_SLUG_DENYLIST):
             dropped["admin_slug"] += 1
             continue
 
-        text = re.sub(r"\s+", " ", a.text(separator=" ", strip=True) or a.attributes.get("title") or "").strip()
         if _is_denied_url_or_anchor(abs_url, text):
             dropped["other_denied"] += 1
             continue
@@ -598,6 +607,8 @@ class Phase2ScraperService:
         await self._polite_wait(host)
         t0 = time.perf_counter()
 
+        st, final_url, html, etag, last_mod = 0, profile_url, "", None, None
+        fetch_err = ""
         try:
             async with httpx.AsyncClient(transport=self.transport) as client:
                 resp = await client.get(
@@ -606,57 +617,87 @@ class Phase2ScraperService:
                     follow_redirects=True,
                     timeout=15.0,
                 )
+            st = resp.status_code
+            final_url = str(resp.url)
+            etag = resp.headers.get("etag")
+            last_mod = resp.headers.get("last-modified")
+            if st == 200:
+                html = decode_bytes_safely(resp.content)
+            else:
+                fetch_err = f"HTTP {st}"
+                await self._log_fetch_trace(
+                    stage="phase2a_profile",
+                    url=final_url,
+                    domain=domain,
+                    engine="httpx",
+                    status_code=st,
+                    error_detail=fetch_err,
+                    html_bytes=len(resp.content),
+                    markdown_chars=0,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                )
         except Exception as exc:
-            err_s = f"{type(exc).__name__}: {exc}"
+            fetch_err = f"{type(exc).__name__}: {exc}"
             await self._log_fetch_trace(
                 stage="phase2a_profile",
                 url=profile_url,
                 domain=domain,
                 engine="httpx",
                 status_code=None,
-                error_detail=err_s,
+                error_detail=fetch_err,
                 html_bytes=0,
                 markdown_chars=0,
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
-            return StepResult.fail(ErrorCode.HTTP_ERROR, f"Profile fetch failed: {err_s}")
 
-        if resp.status_code != 200:
+        # Auto Playwright fallback on httpx timeout/SSL/403/412/521 (fixes ahau.edu.cn & ahnu.edu.cn HTTP_ERROR)
+        used_pw = False
+        if (st in (0, 403, 412, 521) or fetch_err) and self.admin.enable_playwright and self.playwright_fetcher is not None:
+            t_pw = time.perf_counter()
+            try:
+                st, final_url, html = await self.playwright_fetcher(profile_url)
+                used_pw = True
+                fetch_err = "" if st == 200 else f"HTTP {st}"
+                md_pw = len(clean_html_to_markdown(html)[0]) if html else 0
+                await self._log_fetch_trace(
+                    stage="phase2a_profile",
+                    url=final_url,
+                    domain=domain,
+                    engine="playwright",
+                    status_code=st,
+                    error_detail=fetch_err,
+                    html_bytes=len((html or "").encode("utf-8")),
+                    markdown_chars=md_pw,
+                    latency_ms=int((time.perf_counter() - t_pw) * 1000),
+                )
+            except Exception as pw_exc:
+                fetch_err = f"{fetch_err or type(pw_exc).__name__}: {pw_exc}"
+
+        if st != 200 or not html:
+            return StepResult.fail(ErrorCode.HTTP_ERROR, f"Profile fetch failed: {fetch_err or f'HTTP {st}'}")
+
+        markdown, breadcrumb = clean_html_to_markdown(html)
+        if not used_pw:
             await self._log_fetch_trace(
                 stage="phase2a_profile",
-                url=str(resp.url),
+                url=final_url,
                 domain=domain,
                 engine="httpx",
-                status_code=resp.status_code,
-                error_detail=f"HTTP {resp.status_code}",
-                html_bytes=len(resp.content),
-                markdown_chars=0,
+                status_code=200,
+                error_detail="",
+                html_bytes=len(html.encode("utf-8")),
+                markdown_chars=len(markdown),
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
-            return StepResult.fail(ErrorCode.HTTP_ERROR, f"Profile returned HTTP {resp.status_code}")
-
-        html = decode_bytes_safely(resp.content)
-        markdown, breadcrumb = clean_html_to_markdown(html)
-        await self._log_fetch_trace(
-            stage="phase2a_profile",
-            url=str(resp.url),
-            domain=domain,
-            engine="httpx",
-            status_code=200,
-            error_detail="",
-            html_bytes=len(resp.content),
-            markdown_chars=len(markdown),
-            latency_ms=int((time.perf_counter() - t0) * 1000),
-        )
 
         snap = PageSnapshotDoc(
-            url=str(resp.url),
+            url=final_url,
             domain=domain.lower().strip(),
             markdown=markdown,
             sha256=compute_sha256(markdown),
             breadcrumb=breadcrumb,
-            etag=resp.headers.get("etag"),
-            last_modified=resp.headers.get("last-modified"),
+            etag=etag,
+            last_modified=last_mod,
         )
         await self.repo.upsert_page_snapshot(snap)
         logger.info("snapshot_saved", url=snap.url, sha256=snap.sha256[:12])

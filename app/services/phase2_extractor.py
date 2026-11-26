@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 from app.core.llm_router import LLMRouter, llm_router
 from app.core.logging import get_logger
+from app.core.prompt_defaults import load_active_prompt_pair, render_prompt_template
 from app.core.types import ErrorCode, StepResult
 from app.db.repositories import Repository
 from app.schemas.entities import NeedsReviewDoc, PageSnapshotDoc, ProfessorDoc
@@ -121,19 +122,27 @@ def extract_email_regex(markdown: str) -> tuple[str, Literal["FOUND", "MISSING",
 
 
 def filter_negated_degrees(markdown: str, breadcrumb: str, degrees: list[str]) -> list[str]:
-    """Removes PhD or Masters eligibility if explicit negation appears in the profile text."""
+    """Normalizes bilingual Chinese/English degree tokens and removes PhD/Masters if explicit negation appears."""
     norm = normalize_nfkc(f"{markdown} {breadcrumb}")
     if EXPLICIT_NO_RECRUIT_RE.search(norm):
         return []
+    masters_tokens = ("masters", "master", "硕士", "硕导", "硕士生导师", "硕士导师", "ms", "msc", "m.s.", "m.eng")
+    phd_tokens = ("phd", "ph.d", "doctor", "doctoral", "博士", "博导", "博士生导师", "博士导师")
     cleaned: list[str] = []
     for d in degrees:
-        dl = d.strip().lower()
-        if dl == "phd" and PHD_NEGATION_RE.search(norm):
-            continue
-        if dl in ("masters", "master") and MASTERS_NEGATION_RE.search(norm):
-            continue
-        if dl in ("phd", "masters") and dl not in cleaned:
-            cleaned.append(dl)
+        dl = normalize_nfkc(str(d)).lower()
+        mapped: list[str] = []
+        if any(t in dl for t in phd_tokens):
+            mapped.append("phd")
+        if any(t in dl for t in masters_tokens):
+            mapped.append("masters")
+        for m in mapped:
+            if m == "phd" and PHD_NEGATION_RE.search(norm):
+                continue
+            if m == "masters" and MASTERS_NEGATION_RE.search(norm):
+                continue
+            if m not in cleaned:
+                cleaned.append(m)
     return cleaned
 
 
@@ -223,27 +232,12 @@ class Phase2ExtractorService:
         sent_md = smart_truncate_markdown(snapshot.markdown, max_chars=4500)
         roster_ctx_line = f"Parent Verified Roster: {source_roster_url} ({roster_title})" if (source_roster_url or roster_title) else ""
 
-        sys_msg = (
-            "You extract structured university supervisor profiles strictly verbatim from Markdown. "
-            "Respond ONLY with valid JSON. Never fabricate quotes or emails."
-        )
-        prompt = (
-            "Extract structured supervisor information STRICTLY verbatim from the Markdown below.\n"
-            "Return ONLY valid JSON with keys:\n"
-            '{"name": str, "name_en": str, "title": str, "title_en": str, "email": str, '
-            '"degree_eligibility": ["masters"|"phd"], "research_interests": [str], '
-            '"research_areas_en": [str], "photo_url": str, '
-            '"name_evidence_quote": str, "supervisor_evidence_quote": str}\n'
-            "Rules:\n"
-            "- FIRST copy an actual verbatim academic rank or supervisor phrase from the Markdown or Breadcrumb into supervisor_evidence_quote (e.g. 教授, 副教授, 研究员, 博导, 硕导, 博士生导师, 硕士生导师, Professor, Associate Professor).\n"
-            "- ONLY output \"roster_context\" for supervisor_evidence_quote when the individual bio page completely omits repeating rank/supervisor words.\n"
-            "- Copy name_evidence_quote VERBATIM from the Markdown.\n"
-            "- Provide concise English translations/romanizations for name_en, title_en, and research_areas_en.\n"
-            "- If a real portrait photo URL appears in the Markdown (ignore search/logo/icon/banner), put it in photo_url (else empty string).\n"
-            "- Do NOT invent emails or quotes, and NEVER output hex cipher strings as emails.\n\n"
-            f"{roster_ctx_line}\n"
-            f"Breadcrumb: {snapshot.breadcrumb}\n"
-            f"Markdown:\n{sent_md}"
+        sys_msg, user_tmpl = await load_active_prompt_pair(self.repo, "phase2_extractor")
+        prompt = render_prompt_template(
+            user_tmpl,
+            roster_ctx_line=roster_ctx_line,
+            breadcrumb=snapshot.breadcrumb,
+            sent_md=sent_md,
         )
         llm_res = await self.router.complete(
             [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
@@ -397,21 +391,16 @@ class Phase2ExtractorService:
         chunks = [md[i : i + chunk_chars] for i in range(0, min(len(md), chunk_chars * 4), chunk_chars)]
         extracted: list[ProfessorDoc] = []
         seen_names: set[str] = set()
+        sys_msg_inline, user_tmpl_inline = await load_active_prompt_pair(self.repo, "phase2_inline_table")
         for chunk_idx, chunk in enumerate(chunks):
-            sys_msg = (
-                "You extract multiple university faculty/supervisor records strictly verbatim from a roster table in Markdown. "
-                "Return ONLY valid JSON."
-            )
-            prompt = (
-                "Extract ALL professors/supervisors listed in this inline roster table chunk.\n"
-                'Return JSON ONLY: {"professors": [{"name": str, "name_en": str, "title": str, "title_en": str, '
-                '"email": str, "degree_eligibility": ["masters"|"phd"], "research_interests": [str], '
-                '"name_evidence_quote": str, "supervisor_evidence_quote": str}]}\n'
-                f"Parent Verified Roster: {source_roster_url} ({roster_title})\n"
-                f"Markdown:\n{chunk}"
+            prompt = render_prompt_template(
+                user_tmpl_inline,
+                source_roster_url=source_roster_url,
+                roster_title=roster_title,
+                chunk=chunk,
             )
             llm_res = await self.router.complete(
-                [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+                [{"role": "system", "content": sys_msg_inline}, {"role": "user", "content": prompt}],
                 json_mode=True,
                 max_tokens=900,
                 stage="phase2_inline_table",

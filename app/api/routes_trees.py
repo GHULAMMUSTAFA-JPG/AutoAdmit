@@ -6,6 +6,13 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from app.core.job_control import (
+    clear_job_control,
+    ensure_cancel_event,
+    freeze_run_archive,
+    is_job_stopped,
+    register_job_task,
+)
 from app.core.llm_router import llm_router
 from app.core.logging import current_domain, current_job_id, get_logger
 from app.db.repositories import Repository
@@ -13,7 +20,12 @@ from app.schemas.entities import JobDoc, UniversityDeptDoc, utc_now
 from app.schemas.filters import AdminConfig, parse_tier_limit
 from app.services.phase2_extractor import Phase2ExtractorService
 from app.services.phase2_scraper import Phase2ScraperService
-from app.services.runner import WORKER_TIMEOUT_SEC, is_canary_sentinel_mismatch
+from app.services.runner import (
+    EXTRACT_PER_PROF_TIMEOUT_SEC,
+    WORKER_TIMEOUT_SEC,
+    compute_extract_uni_timeout,
+    is_canary_sentinel_mismatch,
+)
 from app.services.site_tree_builder import SiteTreeBuilder
 from scripts.seed_universities import filter_university_seeds
 
@@ -73,6 +85,8 @@ async def _run_tree_build_job(
         async def _worker() -> None:
             nonlocal total_hops, rosters_verified, departments_mapped, bfs_dfs_wins, serper_fallback_wins, cache_wins, failures
             while not queue.empty():
+                if is_job_stopped(jid):
+                    break
                 try:
                     dom = queue.get_nowait()
                 except asyncio.QueueEmpty:
@@ -170,15 +184,26 @@ async def _run_tree_build_job(
                     current_domain.reset(dom_token)
                     queue.task_done()
 
+        ensure_cancel_event(jid)
         workers = min(max(1, admin.max_concurrent_universities), max(1, queue.qsize()))
-        await asyncio.gather(*[_worker() for _ in range(workers)])
+        try:
+            await asyncio.gather(*[_worker() for _ in range(workers)])
+        except asyncio.CancelledError:
+            job.status = "STOPPED"
+            job.completed_at = utc_now()
+            await repo.upsert_job(job)
+            await freeze_run_archive(repo, jid)
+            logger.info("tree_job_stopped", job_id=jid, scorecard=job.scorecard)
+            return job
 
-        job.status = "COMPLETED"
+        job.status = "STOPPED" if is_job_stopped(jid) else "COMPLETED"
         job.completed_at = utc_now()
         await repo.upsert_job(job)
-        logger.info("tree_job_completed", job_id=jid, scorecard=job.scorecard)
+        await freeze_run_archive(repo, jid)
+        logger.info("tree_job_completed", job_id=jid, status=job.status, scorecard=job.scorecard)
         return job
     finally:
+        clear_job_control(jid)
         current_job_id.reset(job_token)
 
 
@@ -240,7 +265,8 @@ async def build_trees_endpoint(body: BuildTreesRequest, request: Request):
             "scorecard": done.scorecard,
         }
 
-    asyncio.create_task(_run_tree_build_job(repo, builder, admin, job, body.department, body.degree, body.force_refresh))
+    task = asyncio.create_task(_run_tree_build_job(repo, builder, admin, job, body.department, body.degree, body.force_refresh))
+    register_job_task(job_id, task)
     return {
         "source": "job",
         "job_id": job_id,
@@ -332,6 +358,8 @@ async def _run_tree_extract_job(
 
                         canary_checked = False
                         for prof_url in prof_urls:
+                            if is_job_stopped(jid):
+                                break
                             # $0 Resume: skip already-VERIFIED professors unless force_reextract=True
                             if not force_reextract:
                                 existing_p = await repo.get_professor_by_url(prof_url)
@@ -340,14 +368,28 @@ async def _run_tree_extract_job(
                                     uni_skipped += 1
                                     continue
 
-                            snap_res = await scraper.fetch_and_snapshot_profile(prof_url, dom)
+                            try:
+                                snap_res = await asyncio.wait_for(
+                                    scraper.fetch_and_snapshot_profile(prof_url, dom),
+                                    timeout=EXTRACT_PER_PROF_TIMEOUT_SEC,
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code="PROF_TIMEOUT")
+                                continue
                             if not snap_res.ok:
                                 logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code=snap_res.error_code)
                                 continue
                             uni_attempts += 1
-                            ext_res = await extractor.extract_from_snapshot(
-                                snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
-                            )
+                            try:
+                                ext_res = await asyncio.wait_for(
+                                    extractor.extract_from_snapshot(
+                                        snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
+                                    ),
+                                    timeout=EXTRACT_PER_PROF_TIMEOUT_SEC,
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning("phase2_extract_rejected", job_id=jid, domain=dom, url=prof_url, error_code="PROF_TIMEOUT", detail="Extraction timed out")
+                                continue
                             if ext_res.ok:
                                 uni_verified += 1
                             else:
@@ -364,16 +406,19 @@ async def _run_tree_extract_job(
                                     break
                             canary_checked = True
 
+                    uni_budget = compute_extract_uni_timeout(int(meta.get("candidate_profile_count") or 10))
                     try:
-                        await asyncio.wait_for(_extract_one_uni(), timeout=WORKER_TIMEOUT_SEC)
+                        await asyncio.wait_for(_extract_one_uni(), timeout=uni_budget)
+                    except asyncio.CancelledError:
+                        raise
                     except asyncio.TimeoutError:
                         uni_err = {
                             "domain": dom,
                             "stage": "worker_timeout",
                             "error_code": "WORKER_TIMEOUT",
-                            "detail": f"Extraction worker exceeded {int(WORKER_TIMEOUT_SEC)}s timeout.",
+                            "detail": f"Extraction worker exceeded {int(uni_budget)}s scaled timeout.",
                         }
-                        logger.error("tree_extract_worker_timeout", job_id=jid, domain=dom, timeout_sec=WORKER_TIMEOUT_SEC)
+                        logger.error("tree_extract_worker_timeout", job_id=jid, domain=dom, timeout_sec=uni_budget)
                     except Exception as exc:
                         uni_err = {
                             "domain": dom,
@@ -443,15 +488,26 @@ async def _run_tree_extract_job(
                         active_workers = max(0, active_workers - 1)
                         slot_cond.notify_all()
 
+        ensure_cancel_event(jid)
         workers = min(max(1, admin.max_concurrent_universities), max(1, queue.qsize()))
-        await asyncio.gather(*[_worker() for _ in range(workers)])
+        try:
+            await asyncio.gather(*[_worker() for _ in range(workers)])
+        except asyncio.CancelledError:
+            job.status = "STOPPED"
+            job.completed_at = utc_now()
+            await repo.upsert_job(job)
+            await freeze_run_archive(repo, jid)
+            logger.info("tree_extract_job_stopped", job_id=jid, scorecard=job.scorecard)
+            return job
 
-        job.status = "COMPLETED"
+        job.status = "STOPPED" if is_job_stopped(jid) else "COMPLETED"
         job.completed_at = utc_now()
         await repo.upsert_job(job)
-        logger.info("tree_extract_job_completed", job_id=jid, scorecard=job.scorecard)
+        await freeze_run_archive(repo, jid)
+        logger.info("tree_extract_job_completed", job_id=jid, status=job.status, scorecard=job.scorecard)
         return job
     finally:
+        clear_job_control(jid)
         current_job_id.reset(job_token)
 
 
@@ -494,6 +550,7 @@ async def extract_from_trees_endpoint(body: ExtractFromTreesRequest, request: Re
                 "roster_url": entry.roster_url,
                 "department_url": entry.department_url,
                 "strategy": entry.strategy,
+                "candidate_profile_count": entry.candidate_profile_count,
                 "nav_type": t.nav_type,
                 "departments_mapped_count": len(t.departments_map),
             }
@@ -556,11 +613,12 @@ async def extract_from_trees_endpoint(body: ExtractFromTreesRequest, request: Re
             "scorecard": done.scorecard,
         }
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_tree_extract_job(
             repo, scraper, extractor, admin, job, roster_map, body.department, body.degree, force_reextract=body.force_reextract
         )
     )
+    register_job_task(job_id, task)
     return {
         "source": "job",
         "job_id": job_id,

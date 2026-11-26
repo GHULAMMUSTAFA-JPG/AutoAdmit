@@ -13,6 +13,7 @@ from selectolax.lexbor import LexborHTMLParser
 from app.core.config import settings
 from app.core.llm_router import LLMRouter, llm_router
 from app.core.logging import current_domain, current_job_id, get_logger
+from app.core.prompt_defaults import load_active_prompt_pair, render_prompt_template
 from app.core.types import ErrorCode, StepResult
 from app.db.repositories import Repository
 from app.schemas.entities import (
@@ -236,7 +237,11 @@ def extract_3zone_links_with_meta(
         href = (a_node.attributes.get("href") or "").strip()
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
             return False
-        abs_url = urljoin(base_url, href).split("#")[0]
+        try:
+            abs_url = urljoin(base_url, href).split("#")[0]
+            _ = urlparse(abs_url).netloc
+        except ValueError:
+            return False
         if abs_url in seen or abs_url.rstrip("/") == base_url.rstrip("/"):
             return False
         if not is_same_root_domain(abs_url, root_domain):
@@ -550,17 +555,18 @@ class SiteTreeBuilder:
             if len(top_links) >= 8:
                 break
 
-        prompt = (
-            f"Verify if this webpage is a REAL faculty/supervisor roster list for department '{department}' ({degree}).\n"
-            f"REJECT university-wide admin/HR pages, news/publications lists, or unrelated departments.\n"
-            f"URL: {url}\n"
-            f"Title: {page_title}\n"
-            f"Breadcrumb: {breadcrumb}\n"
-            f"Sample Links: {top_links}\n\n"
-            f'Return JSON ONLY: {{"is_valid_dept_faculty_roster": true|false, "roster_degree_scope": "masters|phd|all|unknown", "reason": str}}'
+        sys_msg, user_tmpl = await load_active_prompt_pair(self.repo, "roster_agent_verify")
+        prompt = render_prompt_template(
+            user_tmpl,
+            department=department,
+            degree=degree,
+            url=url,
+            page_title=page_title,
+            breadcrumb=breadcrumb,
+            top_links=top_links,
         )
         llm_res = await self.router.complete(
-            [{"role": "user", "content": prompt}],
+            [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
             json_mode=True,
             max_tokens=150,
             use_colab=self.admin.enable_colab_bridge,
@@ -599,17 +605,17 @@ class SiteTreeBuilder:
             if stage == "home"
             else f"Find the Faculty / Supervisors roster page (师资队伍 / 教师名录 / {DEGREE_ZH.get(degree, '导师')}) for '{department}'."
         )
-        prompt = (
-            f"Current page: {url}\nGoal: {goal}\n"
-            f"Prefer official Chinese department/faculty portals over English brochure subdomains (ev., en.).\n"
-            f"Ignore News, Admissions, Alumni, Campus Life, Careers, Login.\n\n"
-            f"Links:\n{md_links}\n\n"
-            f'Return JSON ONLY: {{"branches": [{{"label": str, "url": str, "zone": "NAV"|"SIDEBAR"|"BODY"}}]}} '
-            f"(max {top_k} ranked best-first)."
+        sys_msg, user_tmpl = await load_active_prompt_pair(self.repo, "tree_branch_select")
+        prompt = render_prompt_template(
+            user_tmpl,
+            url=url,
+            goal=goal,
+            md_links=md_links,
+            top_k=top_k,
         )
 
         llm_res = await self.router.complete(
-            [{"role": "user", "content": prompt}],
+            [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
             json_mode=True,
             max_tokens=300,
             use_colab=self.admin.enable_colab_bridge,

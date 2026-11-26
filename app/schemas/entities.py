@@ -73,7 +73,7 @@ class JobDoc(BaseModel):
     """Resumable async job checkpoint, per-university row details & scorecard document in `jobs`."""
     job_id: str
     request: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"] = "QUEUED"
+    status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED", "STOPPED"] = "QUEUED"
     queue_mode: str = "PARALLEL_4X"
     active_concurrency: int = 4
     target_domains: list[str] = Field(default_factory=list)
@@ -215,3 +215,29 @@ class DomainPlaybookDoc(BaseModel):
     last_failure_code: str = ""
     learned_notes: str = ""
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PromptVersionDoc(BaseModel):
+    """Versioned editable Qwen prompt stored in `prompt_versions`."""
+    version_id: str
+    prompt_key: Literal["phase2_extractor", "phase2_inline_table", "tree_branch_select", "roster_agent_verify"]
+    version: int = 1
+    system_prompt: str = ""
+    user_prompt_template: str
+    note: str = ""
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class RunArchiveDoc(BaseModel):
+    """Frozen per-run logs & diagnostic archive stored in `run_archives`."""
+    job_id: str
+    mode: str = "FULL_PIPELINE"
+    region: str = "All Regions"
+    status: str = "COMPLETED"
+    target_domains: list[str] = Field(default_factory=list)
+    professors_count: int = 0
+    traces_count: int = 0
+    reviews_count: int = 0
+    snapshot_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)

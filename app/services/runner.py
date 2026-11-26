@@ -5,6 +5,7 @@ from collections import Counter
 import uuid
 from typing import Any
 
+from app.core.job_control import clear_job_control, ensure_cancel_event, freeze_run_archive, is_job_stopped
 from app.core.llm_router import llm_router
 from app.core.logging import current_domain, current_job_id, get_logger
 from app.db.repositories import Repository
@@ -17,6 +18,12 @@ from app.services.phase2_scraper import Phase2ScraperService
 logger = get_logger("services.runner")
 
 WORKER_TIMEOUT_SEC = 240.0
+EXTRACT_PER_PROF_TIMEOUT_SEC = 90.0
+
+
+def compute_extract_uni_timeout(prof_count: int) -> float:
+    """Scales Step 2 extraction budget to roster size (300s min, 1800s max, ~35s/prof)."""
+    return float(max(300.0, min(1800.0, max(1, prof_count) * 35.0)))
 
 
 def is_canary_sentinel_mismatch(error_code: Any, detail: str) -> bool:
@@ -127,9 +134,13 @@ class PipelineRunner:
             async def _worker() -> None:
                 nonlocal active_workers
                 while not work_queue.empty():
+                    if is_job_stopped(jid):
+                        break
                     async with slot_cond:
                         while active_workers >= min(self._get_concurrency(), max(1, llm_router.active_concurrency)):
                             await slot_cond.wait_for(lambda: active_workers < min(self._get_concurrency(), max(1, llm_router.active_concurrency)))
+                        if is_job_stopped(jid):
+                            break
                         try:
                             dom = work_queue.get_nowait()
                         except asyncio.QueueEmpty:
@@ -189,14 +200,30 @@ class PipelineRunner:
                                     else:
                                         canary_checked = False
                                         for idx, prof_url in enumerate(prof_urls):
-                                            snap_res = await self.scraper.fetch_and_snapshot_profile(prof_url, dom)
+                                            if is_job_stopped(jid):
+                                                break
+                                            try:
+                                                snap_res = await asyncio.wait_for(
+                                                    self.scraper.fetch_and_snapshot_profile(prof_url, dom),
+                                                    timeout=EXTRACT_PER_PROF_TIMEOUT_SEC,
+                                                )
+                                            except asyncio.TimeoutError:
+                                                logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code="PROF_TIMEOUT")
+                                                continue
                                             if not snap_res.ok:
                                                 logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code=snap_res.error_code)
                                                 continue
                                             uni_attempts += 1
-                                            ext_res = await self.extractor.extract_from_snapshot(
-                                                snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
-                                            )
+                                            try:
+                                                ext_res = await asyncio.wait_for(
+                                                    self.extractor.extract_from_snapshot(
+                                                        snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
+                                                    ),
+                                                    timeout=EXTRACT_PER_PROF_TIMEOUT_SEC,
+                                                )
+                                            except asyncio.TimeoutError:
+                                                logger.warning("phase2_extract_rejected", job_id=jid, domain=dom, url=prof_url, error_code="PROF_TIMEOUT", detail="Extraction timed out")
+                                                continue
                                             if ext_res.ok:
                                                 uni_verified += 1
                                             else:
@@ -241,7 +268,10 @@ class PipelineRunner:
                                 logger.warning("zero_verified_downgraded", job_id=jid, domain=dom, found=uni_found)
 
                         try:
-                            await asyncio.wait_for(_process_one_university(), timeout=WORKER_TIMEOUT_SEC)
+                            await asyncio.wait_for(_process_one_university(), timeout=max(WORKER_TIMEOUT_SEC, 900.0))
+                        except asyncio.CancelledError:
+                            row_status = "COMPLETE" if uni_verified > 0 else "NEEDS_REVIEW"
+                            raise
                         except asyncio.TimeoutError:
                             row_status = "NEEDS_REVIEW"
                             uni_err = {
@@ -300,13 +330,24 @@ class PipelineRunner:
                             active_workers = max(0, active_workers - 1)
                             slot_cond.notify_all()
 
+            ensure_cancel_event(jid)
             worker_count = min(self._get_concurrency(), max(1, work_queue.qsize()))
-            await asyncio.gather(*[_worker() for _ in range(worker_count)])
+            try:
+                await asyncio.gather(*[_worker() for _ in range(worker_count)])
+            except asyncio.CancelledError:
+                job.status = "STOPPED"
+                job.completed_at = utc_now()
+                await self.repo.upsert_job(job)
+                await freeze_run_archive(self.repo, jid)
+                logger.info("runner_stopped", job_id=jid, scorecard=job.scorecard)
+                return job
 
-            job.status = "COMPLETED"
+            job.status = "STOPPED" if is_job_stopped(jid) else "COMPLETED"
             job.completed_at = utc_now()
             await self.repo.upsert_job(job)
-            logger.info("runner_completed", job_id=jid, scorecard=job.scorecard)
+            await freeze_run_archive(self.repo, jid)
+            logger.info("runner_completed", job_id=jid, status=job.status, scorecard=job.scorecard)
             return job
         finally:
+            clear_job_control(jid)
             current_job_id.reset(job_token)

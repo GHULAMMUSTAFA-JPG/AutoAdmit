@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes_admin import router as admin_router
 from app.api.routes_analytics import router as analytics_router
 from app.api.routes_jobs import router as jobs_router
+from app.api.routes_prompts import router as prompts_router
 from app.api.routes_trees import router as trees_router
 from app.core.llm_router import llm_router
 from app.db.mongo import MongoManager, mongo_manager
@@ -65,6 +66,7 @@ def create_app(manager: MongoManager | None = None, admin_config: AdminConfig | 
     application.include_router(admin_router)
     application.include_router(trees_router)
     application.include_router(analytics_router)
+    application.include_router(prompts_router)
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

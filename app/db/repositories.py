@@ -14,6 +14,8 @@ from app.schemas.entities import (
     PageSnapshotDoc,
     Phase2LinkAuditDoc,
     ProfessorDoc,
+    PromptVersionDoc,
+    RunArchiveDoc,
     UniversityDeptDoc,
     UniversitySeed,
     UniversitySiteTreeDoc,
@@ -474,6 +476,97 @@ class Repository:
             doc.pop("_id", None)
             out.append(DomainPlaybookDoc(**doc))
         return out
+
+    # ------------------------------------------------------------------ prompt_versions (editable Qwen Prompt Studio)
+    async def get_active_prompt(self, prompt_key: str) -> PromptVersionDoc | None:
+        doc = await self.db["prompt_versions"].find_one({"prompt_key": prompt_key, "is_active": True})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return PromptVersionDoc(**doc)
+
+    async def list_prompt_versions(self, prompt_key: str | None = None, limit: int = 100) -> list[PromptVersionDoc]:
+        query: dict[str, Any] = {"prompt_key": prompt_key} if prompt_key else {}
+        cursor = self.db["prompt_versions"].find(query).sort([("prompt_key", 1), ("version", -1)]).limit(limit)
+        out: list[PromptVersionDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(PromptVersionDoc(**doc))
+        return out
+
+    async def save_prompt_version(
+        self,
+        *,
+        prompt_key: str,
+        system_prompt: str,
+        user_prompt_template: str,
+        note: str = "",
+        version_id: str | None = None,
+    ) -> PromptVersionDoc:
+        import uuid as _uuid
+        latest = await self.db["prompt_versions"].find_one({"prompt_key": prompt_key}, sort=[("version", -1)])
+        next_ver = int(latest["version"]) + 1 if latest else 1
+        await self.db["prompt_versions"].update_many(
+            {"prompt_key": prompt_key, "is_active": True},
+            {"$set": {"is_active": False}},
+        )
+        doc = PromptVersionDoc(
+            version_id=version_id or f"pv_{_uuid.uuid4().hex[:10]}",
+            prompt_key=prompt_key,  # type: ignore[arg-type]
+            version=next_ver,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+            note=note,
+            is_active=True,
+        )
+        await self.db["prompt_versions"].insert_one(doc.model_dump())
+        return doc
+
+    async def activate_prompt_version(self, prompt_key: str, version_id: str) -> PromptVersionDoc | None:
+        target = await self.db["prompt_versions"].find_one({"prompt_key": prompt_key, "version_id": version_id})
+        if not target:
+            return None
+        await self.db["prompt_versions"].update_many(
+            {"prompt_key": prompt_key, "is_active": True},
+            {"$set": {"is_active": False}},
+        )
+        await self.db["prompt_versions"].update_one(
+            {"version_id": version_id},
+            {"$set": {"is_active": True}},
+        )
+        target["is_active"] = True
+        target.pop("_id", None)
+        return PromptVersionDoc(**target)
+
+    # ------------------------------------------------------------------ run_archives & job history
+    async def upsert_run_archive(self, archive: RunArchiveDoc) -> None:
+        await self.db["run_archives"].update_one(
+            {"job_id": archive.job_id},
+            {"$set": archive.model_dump()},
+            upsert=True,
+        )
+
+    async def get_run_archive(self, job_id: str) -> RunArchiveDoc | None:
+        doc = await self.db["run_archives"].find_one({"job_id": job_id.strip()})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return RunArchiveDoc(**doc)
+
+    async def list_recent_jobs(self, limit: int = 30) -> list[JobDoc]:
+        cursor = self.db["jobs"].find({}).sort("_id", -1).limit(limit)
+        out: list[JobDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(JobDoc(**doc))
+        return out
+
+    async def get_active_job(self) -> JobDoc | None:
+        doc = await self.db["jobs"].find_one({"status": {"$in": ["RUNNING", "QUEUED"]}}, sort=[("_id", -1)])
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return JobDoc(**doc)
 
     # ------------------------------------------------------------------ system_state (persisted runtime config)
     async def set_system_state(self, key: str, value: Any) -> None:

@@ -248,6 +248,7 @@
               <button class="btn btn-secondary btn-sm" onclick="openAdminLogsDrawer(true)">View Live Logs</button>
               <button class="btn btn-secondary btn-sm" onclick="downloadCurrentJobLogs()">&#8681; Download .jsonl</button>
               <button class="btn btn-primary btn-sm" onclick="downloadRunLogsZip()">&#128230; All Run Logs (.zip)</button>
+              <button id="btn-stop-pipeline" class="btn btn-sm" style="background:#dc2626; color:#fff; border:1px solid #b91c1c;" onclick="stopActivePipeline(this)">&#9209; Stop Pipeline</button>
             </div>
           </div>
         </div>
@@ -268,6 +269,9 @@
             </button>
             <button class="saas-tab-btn" data-tab="tab-analytics" onclick="switchTab('tab-analytics', this)">
               LLM &amp; API Analytics <span class="saas-tab-count" id="tab-count-analytics">0</span>
+            </button>
+            <button class="saas-tab-btn" data-tab="tab-prompts" onclick="switchTab('tab-prompts', this); loadPromptStudio(); loadRunHistory();">
+              Qwen Prompts &amp; Runs <span class="saas-tab-count" id="tab-count-runs">0</span>
             </button>
           </div>
         </div>
@@ -509,6 +513,91 @@
                 <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No API traces recorded yet.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- TAB 5: Qwen Prompt Studio & Per-Run ZIP Archive History -->
+        <div id="tab-prompts" class="saas-tab-pane">
+          <div style="border:1px solid var(--border-subtle); border-radius:10px; padding:14px; background:#f8fafc; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <div>
+                <strong style="font-size:13.5px;">Qwen(C) Prompt Studio &amp; Version History</strong>
+                <div id="prompt-placeholders-hint" style="font-size:11.5px; color:var(--text-secondary); font-family:var(--font-mono); margin-top:2px;">Select a prompt to edit or paste a new version (all previous versions are preserved in MongoDB).</div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="prompt-key-select" class="form-control form-control-sm" style="width:280px;" onchange="onPromptKeySelected()">
+                  <option value="phase2_extractor">Phase 2B — Professor Profile Extractor</option>
+                  <option value="phase2_inline_table">Phase 2B — Inline Table Extractor</option>
+                  <option value="tree_branch_select">Step 1 — Site Tree Branch Selector</option>
+                  <option value="roster_agent_verify">Step 1 — Agentic Roster Gate</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" onclick="loadPromptStudio()">&#8635; Reload</button>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:10px;">
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-secondary);">System Prompt</label>
+                <textarea id="prompt-system-input" class="form-control" rows="2" style="font-family:var(--font-mono); font-size:12px;"></textarea>
+              </div>
+              <div>
+                <label style="font-size:11.5px; font-weight:700; color:var(--text-secondary);">User Prompt Template (Edit or Paste New Prompt)</label>
+                <textarea id="prompt-user-input" class="form-control" rows="9" style="font-family:var(--font-mono); font-size:12px;"></textarea>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <input type="text" id="prompt-note-input" class="form-control form-control-sm" style="flex:1; min-width:220px;" placeholder="Change note (e.g. 'Tightened Chinese degree rules')" />
+                <button id="btn-save-prompt" class="btn btn-primary btn-sm" onclick="saveNewPromptVersion(this)">&#128190; Save as New Active Version</button>
+                <span id="prompt-save-status" style="font-size:12px; color:var(--text-secondary);"></span>
+              </div>
+            </div>
+
+            <div style="font-size:12px; font-weight:700; margin:10px 0 6px; color:var(--text-primary);">Saved Prompt Versions (Active &amp; Previous Records in MongoDB)</div>
+            <div class="saas-scroll-340" style="max-height:220px; background:#fff;">
+              <table class="saas-table">
+                <thead>
+                  <tr>
+                    <th style="width:70px;">Ver</th>
+                    <th style="width:100px;">State</th>
+                    <th>Change Note</th>
+                    <th>Preview (User Prompt)</th>
+                    <th style="width:155px;">Saved At</th>
+                    <th style="width:150px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="prompt-versions-body">
+                  <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:14px;">Loading prompt history...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--border-subtle); border-radius:10px; padding:14px; background:#fff;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div>
+                <strong style="font-size:13.5px;">Per-Run History &amp; Permanent Full Logs ZIP Archives</strong>
+                <div style="font-size:11.5px; color:var(--text-secondary);">Every completed or stopped run freezes its own full snapshot in MongoDB so starting a new run never overwrites old ZIP data.</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="loadRunHistory()">&#8635; Refresh Runs</button>
+            </div>
+            <div class="saas-scroll-340">
+              <table class="saas-table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Mode</th>
+                    <th>Region</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Verified</th>
+                    <th>Archive</th>
+                    <th style="width:190px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="run-history-body">
+                  <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:16px;">Loading run history...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

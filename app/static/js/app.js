@@ -98,11 +98,38 @@ function downloadFilteredProfessors(fmt = "csv") {
   downloadProfessors(dom, fmt);
 }
 
-function downloadRunLogsZip() {
-  const jid = (document.getElementById("analytics-job-id")?.value || document.getElementById("log-job-id")?.value || state.activeJobId || "").trim();
+function downloadRunLogsZip(explicitJobId = "") {
+  const jid = (explicitJobId || document.getElementById("analytics-job-id")?.value || document.getElementById("log-job-id")?.value || state.activeJobId || "").trim();
   const q = jid ? `?job_id=${encodeURIComponent(jid)}` : "";
   window.location.href = `/api/v1/export/run-logs-zip${q}`;
   showToast(`Downloading complete Run Logs ZIP${jid ? ` (${jid})` : ""}...`);
+}
+
+async function stopActivePipeline(btn, explicitJobId = "") {
+  const jid = (explicitJobId || state.activeJobId || "").trim();
+  if (!jid) {
+    showToast("No active pipeline job to stop.");
+    return;
+  }
+  if (!confirm(`Stop running pipeline job '${jid}'? All already-verified professors will be kept.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = "Stopping..."; }
+  try {
+    const res = await fetch(`/api/v1/jobs/${encodeURIComponent(jid)}/stop`, { method: "POST" });
+    if (res.ok) {
+      showToast(`Pipeline job ${jid} STOPPED cleanly.`);
+      if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+      try { localStorage.removeItem("autoadmit_active_job_id"); } catch (_) {}
+      const titleEl = document.getElementById("banner-job-title");
+      if (titleEl) titleEl.textContent = `Job ${jid} — STOPPED`;
+      await Promise.all([loadSystemSummary(), loadUniversitiesOverview(), loadProfessors(), loadRunHistory()]);
+    } else {
+      showToast("Stop failed: " + (await res.text()));
+    }
+  } catch (e) {
+    showToast(`Stop error: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "⏹ Stop Pipeline"; }
+  }
 }
 
 function downloadDebugBundle() {
@@ -299,6 +326,7 @@ function _attachJobStart(body, msg) {
     renderUniversitiesTable();
   }
   state.activeJobId = body.job_id;
+  try { localStorage.setItem("autoadmit_active_job_id", body.job_id); } catch (_) {}
   document.getElementById("log-job-id").value = body.job_id;
   document.getElementById("analytics-job-id").value = body.job_id;
   document.getElementById("log-file-label").textContent = `logs/jobs/${body.job_id}.jsonl`;
@@ -1284,6 +1312,200 @@ async function triggerAdminDiffSync(btn) {
   }
 }
 
+// =========================================================================
+// Tab 5: Qwen Prompt Studio (Editable + Version History) & Run Archive History
+// =========================================================================
+let _promptCatalog = {};
+
+async function loadPromptStudio() {
+  try {
+    const res = await fetch("/api/v1/prompts");
+    if (!res.ok) return;
+    const data = await res.json();
+    _promptCatalog = {};
+    for (const p of (data.prompts || [])) {
+      _promptCatalog[p.prompt_key] = p;
+    }
+    onPromptKeySelected();
+  } catch (e) {
+    console.error("Prompt studio load error:", e);
+  }
+}
+
+function onPromptKeySelected() {
+  const key = document.getElementById("prompt-key-select")?.value || "phase2_extractor";
+  const item = _promptCatalog[key];
+  if (!item) return;
+  const hint = document.getElementById("prompt-placeholders-hint");
+  if (hint) hint.textContent = `Available placeholders: ${item.placeholders || ""}`;
+  const active = item.active || {};
+  const sysEl = document.getElementById("prompt-system-input");
+  const usrEl = document.getElementById("prompt-user-input");
+  if (sysEl) sysEl.value = active.system_prompt || "";
+  if (usrEl) usrEl.value = active.user_prompt_template || "";
+  renderPromptVersionsTable(key, item.versions || []);
+}
+
+function renderPromptVersionsTable(promptKey, versions) {
+  const tbody = document.getElementById("prompt-versions-body");
+  if (!tbody) return;
+  if (!versions.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:14px;">No versions saved yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = versions.map((v, idx) => {
+    const badge = v.is_active
+      ? `<span class="p12-badge p12-badge-ok">ACTIVE</span>`
+      : `<span class="p12-badge p12-badge-muted">Previous</span>`;
+    const ts = (v.created_at || "").replace("T", " ").slice(0, 19);
+    const preview = (v.user_prompt_template || "").replace(/\s+/g, " ").slice(0, 110);
+    const actBtn = v.is_active
+      ? `<button class="btn btn-secondary btn-sm" onclick="loadVersionIntoEditor('${esc(promptKey)}', ${idx})">Load</button>`
+      : `<button class="btn btn-secondary btn-sm" onclick="loadVersionIntoEditor('${esc(promptKey)}', ${idx})">View</button>
+         <button class="btn btn-primary btn-sm" onclick="activatePromptVersion('${esc(promptKey)}', '${esc(v.version_id)}')">Restore</button>`;
+    return `
+      <tr>
+        <td style="font-family:var(--font-mono); font-weight:700;">v${esc(v.version)}</td>
+        <td>${badge}</td>
+        <td style="font-size:12px;">${esc(v.note || "—")}</td>
+        <td style="font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(preview)}</td>
+        <td style="font-family:var(--font-mono); font-size:11px;">${esc(ts)}</td>
+        <td><div style="display:flex; gap:4px;">${actBtn}</div></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function loadVersionIntoEditor(promptKey, idx) {
+  const v = (_promptCatalog[promptKey]?.versions || [])[idx];
+  if (!v) return;
+  document.getElementById("prompt-system-input").value = v.system_prompt || "";
+  document.getElementById("prompt-user-input").value = v.user_prompt_template || "";
+  document.getElementById("prompt-save-status").textContent = `Loaded v${v.version} into editor (click Save to create new active version or Restore to reactivate).`;
+}
+
+async function saveNewPromptVersion(btn) {
+  const key = document.getElementById("prompt-key-select")?.value || "phase2_extractor";
+  const system_prompt = document.getElementById("prompt-system-input")?.value || "";
+  const user_prompt_template = (document.getElementById("prompt-user-input")?.value || "").trim();
+  const note = (document.getElementById("prompt-note-input")?.value || "").trim();
+  if (user_prompt_template.length < 10) {
+    showToast("User prompt template is too short.");
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/v1/prompts/${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system_prompt, user_prompt_template, note })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById("prompt-note-input").value = "";
+      document.getElementById("prompt-save-status").textContent = `Saved v${data.saved.version} as ACTIVE (previous versions preserved in MongoDB).`;
+      showToast(`Saved ${key} v${data.saved.version}!`);
+      await loadPromptStudio();
+    } else {
+      showToast("Save failed: " + (await res.text()));
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function activatePromptVersion(promptKey, versionId) {
+  try {
+    const res = await fetch(`/api/v1/prompts/${encodeURIComponent(promptKey)}/activate/${encodeURIComponent(versionId)}`, { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      showToast(`Restored ${promptKey} v${data.activated.version} as ACTIVE.`);
+      await loadPromptStudio();
+    }
+  } catch (e) {
+    console.error("Activate prompt error:", e);
+  }
+}
+
+async function loadRunHistory() {
+  try {
+    const res = await fetch("/api/v1/jobs/history?limit=30");
+    if (!res.ok) return;
+    const runs = await res.json();
+    const countEl = document.getElementById("tab-count-runs");
+    if (countEl) countEl.textContent = runs.length;
+    const tbody = document.getElementById("run-history-body");
+    if (!tbody) return;
+    if (!runs.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:16px;">No runs recorded yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = runs.map(r => {
+      const st = r.status || "UNKNOWN";
+      const stCls = st === "COMPLETED" ? "p12-badge-ok" : (st === "RUNNING" || st === "QUEUED") ? "p12-badge-info" : st === "STOPPED" ? "p12-badge-warn" : "p12-badge-err";
+      const archBadge = r.has_frozen_archive
+        ? `<span class="p12-badge p12-badge-ok">Frozen</span>`
+        : `<span class="p12-badge p12-badge-muted">Live</span>`;
+      const stopBtn = (st === "RUNNING" || st === "QUEUED")
+        ? `<button class="btn btn-sm" style="background:#dc2626; color:#fff; border:none;" onclick="stopActivePipeline(this, '${esc(r.job_id)}')">&#9209; Stop</button>`
+        : "";
+      return `
+        <tr>
+          <td style="font-family:var(--font-mono); font-weight:700;">${esc(r.job_id)}</td>
+          <td><span class="p12-badge p12-badge-muted">${esc(r.mode)}</span></td>
+          <td>${esc(r.region)}</td>
+          <td><span class="p12-badge ${stCls}">${esc(st)}</span></td>
+          <td style="font-family:var(--font-mono);">${esc(r.done)}/${esc(r.total)}</td>
+          <td style="font-family:var(--font-mono); font-weight:700;">${esc(r.verified_professors)}</td>
+          <td>${archBadge}</td>
+          <td>
+            <div style="display:flex; gap:4px; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" onclick="downloadRunLogsZip('${esc(r.job_id)}')">&#128230; ZIP</button>
+              ${stopBtn}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  } catch (e) {
+    console.error("Run history load error:", e);
+  }
+}
+
+async function reattachActiveJob() {
+  try {
+    const res = await fetch("/api/v1/jobs/active");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.active && data.job) {
+      const job = data.job;
+      state.activeJobId = job.job_id;
+      try { localStorage.setItem("autoadmit_active_job_id", job.job_id); } catch (_) {}
+      const logInput = document.getElementById("log-job-id");
+      if (logInput) logInput.value = job.job_id;
+      const logLbl = document.getElementById("log-file-label");
+      if (logLbl) logLbl.textContent = `logs/jobs/${job.job_id}.jsonl`;
+      document.getElementById("active-job-banner")?.classList.remove("hidden");
+      const titleEl = document.getElementById("banner-job-title");
+      if (titleEl) titleEl.textContent = `Job ${job.job_id} — ${job.status} (${(job.completed_domains || []).length}/${(job.target_domains || []).length} universities)`;
+      if (job.university_details && Object.keys(job.university_details).length) {
+        const merged = {};
+        for (const u of state.universities || []) merged[u.domain] = u;
+        for (const [dom, det] of Object.entries(job.university_details)) {
+          merged[dom] = { ...(merged[dom] || {}), ...det };
+        }
+        state.universities = Object.values(merged).sort((a, b) => (a.rank || 999) - (b.rank || 999));
+        renderUniversitiesTable();
+      }
+      startJobPolling(job.job_id);
+      return;
+    }
+    try { localStorage.removeItem("autoadmit_active_job_id"); } catch (_) {}
+  } catch (e) {
+    console.error("Reattach active job error:", e);
+  }
+}
+
 async function refreshAllData() {
   await Promise.all([
     loadSystemSummary(),
@@ -1291,8 +1513,10 @@ async function refreshAllData() {
     loadProfessors(),
     loadNeedsReview(),
     loadAnalytics(),
-    loadAdminConfig()
+    loadAdminConfig(),
+    loadRunHistory()
   ]);
+  await reattachActiveJob();
 }
 
 document.addEventListener("DOMContentLoaded", () => {

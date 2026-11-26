@@ -115,6 +115,17 @@ async def ensure_permanent_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("domain", ASCENDING)], unique=True, name="uniq_playbook_domain"),
         IndexModel([("cms_fingerprint", ASCENDING)], name="idx_playbook_cms"),
     ])
+
+    await db["prompt_versions"].create_indexes([
+        IndexModel([("version_id", ASCENDING)], unique=True, name="uniq_prompt_version_id"),
+        IndexModel([("prompt_key", ASCENDING), ("version", ASCENDING)], unique=True, name="uniq_prompt_key_ver"),
+        IndexModel([("prompt_key", ASCENDING), ("is_active", ASCENDING)], name="idx_prompt_active"),
+    ])
+
+    await db["run_archives"].create_indexes([
+        IndexModel([("job_id", ASCENDING)], unique=True, name="uniq_run_archive_job_id"),
+        IndexModel([("created_at", ASCENDING)], name="idx_run_archive_created"),
+    ])
     logger.info("permanent_indexes_verified")
 
 

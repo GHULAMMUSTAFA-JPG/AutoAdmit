@@ -58,7 +58,7 @@ def test_admin_url_blocking_cheap_heuristic_and_phase2a_link_audit():
       <aside class="sidebar"><a href="https://cs.test.edu.cn/side.htm">李明</a></aside>
       <main>
         <a href="https://cs.test.edu.cn/faculty/list.htm">张伟</a>
-        <a href="https://cs.test.edu.cn/2025/0412/c100a999/page.htm">李明</a>
+        <a href="https://cs.test.edu.cn/2025/0412/c100a999/page.htm">学院召开2025年工作会议</a>
         <a href="https://cs.test.edu.cn/OpenPositions/hiring.htm">王芳</a>
         <a href="https://cs.test.edu.cn/info/1001/chenhua.htm">陈华</a>
       </main>
