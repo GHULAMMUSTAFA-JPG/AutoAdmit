@@ -685,20 +685,27 @@ async function loadAnalytics() {
       const cardsEl = document.getElementById("analytics-provider-cards");
       const order = ["colab_qwen", "deepseek", "gemini", "serper"];
       let totalCalls = 0;
+      const conns = ov.connections || {};
       cardsEl.innerHTML = order.map(key => {
         const p = (ov.providers || {})[key] || { total_calls: 0, ok_count: 0, failed_count: 0, avg_latency_ms: 0, max_latency_ms: 0, total_tokens: 0, last_error: null };
+        const conn = conns[key] || { live: false, configured: false, label: "Unknown" };
         totalCalls += p.total_calls;
         const hasErr = p.failed_count > 0;
+        const connBadge = conn.live
+          ? `<span class="p12-badge p12-badge-ok">&#9679; ${esc(conn.label)}</span>`
+          : conn.configured
+            ? `<span class="p12-badge p12-badge-err">&#9679; ${esc(conn.label)}</span>`
+            : `<span class="p12-badge p12-badge-muted">${esc(conn.label)}</span>`;
         const statusBadge = p.total_calls === 0
-          ? `<span class="p12-badge p12-badge-muted">Idle</span>`
+          ? connBadge
           : hasErr
-            ? `<span class="p12-badge p12-badge-err">Alert (${p.failed_count} fail)</span>`
-            : `<span class="p12-badge p12-badge-ok">Healthy</span>`;
+            ? `${connBadge} <span class="p12-badge p12-badge-err">Alert (${p.failed_count} fail)</span>`
+            : `${connBadge} <span class="p12-badge p12-badge-info">Healthy</span>`;
         const errBox = p.last_error
           ? `<div class="provider-err-box"><strong>${esc(p.last_error.status)}</strong>: ${esc(p.last_error.detail)}</div>`
           : "";
         return `
-          <div class="provider-card ${hasErr ? "has-error" : ""}">
+          <div class="provider-card ${hasErr || (conn.configured && !conn.live) ? "has-error" : ""}">
             <div class="provider-hdr">
               <span class="provider-name">${esc(PROVIDER_LABELS[key] || key)}</span>
               ${statusBadge}

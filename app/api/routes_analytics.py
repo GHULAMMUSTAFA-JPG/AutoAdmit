@@ -40,15 +40,46 @@ class BenchmarkRequest(BaseModel):
     batch_size: Literal[5, 10, 20] = Field(default=5)
 
 
+def _provider_connection_states(gpu: dict | None = None) -> dict[str, dict]:
+    """Returns live/configured connection state for each provider card so UI shows Live vs Dead instead of ambiguous 'Idle'."""
+    g = gpu or {}
+    qwen_configured = bool((settings.COLAB_BASE_URL or "").strip() and (settings.COLAB_API_KEY or "").strip())
+    qwen_live = bool(g.get("loaded"))
+    return {
+        "colab_qwen": {
+            "live": qwen_live,
+            "configured": qwen_configured,
+            "label": "Live (vLLM)" if qwen_live else ("Dead / Offline" if qwen_configured else "Unconfigured"),
+        },
+        "deepseek": {
+            "live": bool((settings.PRIMARY_LLM_BASE_URL or "").strip() and (settings.PRIMARY_LLM_API_KEY or "").strip()),
+            "configured": bool((settings.PRIMARY_LLM_BASE_URL or "").strip() and (settings.PRIMARY_LLM_API_KEY or "").strip()),
+            "label": "Ready (API Key)" if ((settings.PRIMARY_LLM_BASE_URL or "").strip() and (settings.PRIMARY_LLM_API_KEY or "").strip()) else "Unconfigured",
+        },
+        "gemini": {
+            "live": bool((settings.BACKUP_LLM_BASE_URL or "").strip() and (settings.BACKUP_LLM_API_KEY or "").strip()),
+            "configured": bool((settings.BACKUP_LLM_BASE_URL or "").strip() and (settings.BACKUP_LLM_API_KEY or "").strip()),
+            "label": "Ready (API Key)" if ((settings.BACKUP_LLM_BASE_URL or "").strip() and (settings.BACKUP_LLM_API_KEY or "").strip()) else "Unconfigured",
+        },
+        "serper": {
+            "live": bool((settings.SERPER_API_KEY or "").strip()),
+            "configured": bool((settings.SERPER_API_KEY or "").strip()),
+            "label": "Ready (API Key)" if (settings.SERPER_API_KEY or "").strip() else "Unconfigured",
+        },
+    }
+
+
 @router.get("/overview")
 async def analytics_overview(
     request: Request,
     job_id: str | None = Query(None),
 ):
-    """Returns per-provider latency/token/health metrics, grouped failure_breakdown, and live queue_mode."""
+    """Returns per-provider latency/token/health metrics, live connection state, grouped failure_breakdown, and live queue_mode."""
     repo: Repository = request.app.state.repo
     ov = await repo.get_api_analytics_overview(job_id=job_id)
+    gpu = await colab_gpu_status()
     ov["queue_state"] = llm_router.get_queue_state()
+    ov["connections"] = _provider_connection_states(gpu)
     return ov
 
 
