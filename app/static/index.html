@@ -367,10 +367,12 @@
         <div id="tab-analytics" class="saas-tab-pane">
           <div class="tab-toolbar">
             <div class="tab-toolbar-group">
-              <input type="text" id="analytics-job-id" class="form-control form-control-sm" style="width:170px; font-family:var(--font-mono);" placeholder="Filter job_id (blank=all)" />
+              <select id="analytics-job-id" class="form-control form-control-sm" style="width:205px; font-family:var(--font-mono);" onchange="loadAnalytics()">
+                <option value="">All Time (All Jobs)</option>
+              </select>
               <select id="analytics-provider-filter" class="form-control form-control-sm" style="width:140px;" onchange="loadAnalytics()">
                 <option value="">All Providers</option>
-                <option value="colab_qwen">Colab Qwen</option>
+                <option value="colab_qwen">Qwen(C)</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="gemini">Gemini</option>
                 <option value="serper">Serper</option>
@@ -386,6 +388,8 @@
                 <option value="connection_error">connection_error</option>
               </select>
               <button class="btn btn-primary btn-sm" onclick="loadAnalytics()">&#8635; Refresh Analytics</button>
+              <button id="btn-refresh-conns" class="btn btn-secondary btn-sm" onclick="refreshConnections(this)">&#9889; Refresh Connections</button>
+              <button class="btn btn-secondary btn-sm" onclick="clearAnalyticsTraces()">&#128465; Clear Old Traces</button>
               <button class="btn btn-secondary btn-sm" onclick="downloadDebugBundle()">&#128230; Debug Bundle JSON</button>
             </div>
             <div class="tab-toolbar-group">
@@ -437,7 +441,7 @@
               </div>
               <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                 <select id="bench-provider" class="form-control form-control-sm" style="width:130px;">
-                  <option value="colab_qwen">Colab Qwen</option>
+                  <option value="colab_qwen">Qwen(C)</option>
                   <option value="deepseek">DeepSeek</option>
                   <option value="gemini">Gemini</option>
                 </select>

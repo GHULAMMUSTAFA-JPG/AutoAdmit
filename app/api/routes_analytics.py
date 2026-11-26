@@ -207,3 +207,43 @@ async def list_benchmarks(request: Request, limit: int = Query(30, ge=1, le=200)
     repo: Repository = request.app.state.repo
     runs = await repo.list_benchmark_runs(limit=limit)
     return [r.model_dump(mode="json") for r in runs]
+
+
+@router.post("/refresh-connections")
+async def refresh_connections(request: Request):
+    """Pings live Colab vLLM /health, resets circuit breaker to PARALLEL_4X when healthy, and returns live status."""
+    gpu = await colab_gpu_status()
+    if gpu.get("loaded"):
+        llm_router.reset_colab_circuit()
+        llm_router.queue_mode = "PARALLEL_4X"
+        llm_router.active_concurrency = 4
+    return {
+        "ok": bool(gpu.get("loaded")),
+        "gpu": gpu,
+        "queue_state": llm_router.get_queue_state(),
+    }
+
+
+@router.delete("/traces")
+async def clear_api_traces(request: Request, job_id: str | None = Query(None)):
+    """Clears historical api_call_traces (all or for a specific job_id) for a fresh analytics slate."""
+    repo: Repository = request.app.state.repo
+    query = {"job_id": job_id.strip()} if job_id else {}
+    res = await repo.db["api_call_traces"].delete_many(query)
+    return {"deleted_count": int(res.deleted_count), "job_id": job_id}
+
+
+@router.get("/jobs")
+async def list_analytics_jobs(request: Request, limit: int = Query(30, ge=1, le=100)):
+    """Returns distinct recent job_ids present in api_call_traces / jobs for the Tab 4 Job Filter dropdown."""
+    repo: Repository = request.app.state.repo
+    pipeline = [
+        {"$match": {"job_id": {"$ne": ""}}},
+        {"$group": {"_id": "$job_id", "calls": {"$sum": 1}, "last_ts": {"$max": "$created_at"}}},
+        {"$sort": {"last_ts": -1}},
+        {"$limit": limit},
+    ]
+    out: list[dict] = []
+    async for doc in repo.db["api_call_traces"].aggregate(pipeline):
+        out.append({"job_id": doc["_id"], "calls": int(doc["calls"])})
+    return out

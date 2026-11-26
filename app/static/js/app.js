@@ -573,13 +573,75 @@ function closeAuditModal() {
 // Tab 4: LLM & API Analytics + Trace Modal
 // =========================================================================
 const PROVIDER_LABELS = {
-  colab_qwen: "Colab Qwen (Tier 1)",
+  colab_qwen: "Qwen(C)",
   deepseek: "DeepSeek (Tier 2)",
   gemini: "Gemini (Tier 3)",
   serper: "Serper Search"
 };
 
+async function refreshAnalyticsJobsDropdown() {
+  const sel = document.getElementById("analytics-job-id");
+  if (!sel || sel.tagName !== "SELECT") return;
+  const prev = sel.value;
+  try {
+    const res = await fetch("/api/v1/analytics/jobs");
+    if (!res.ok) return;
+    const jobs = await res.json();
+    sel.innerHTML = `<option value="">All Time (All Jobs)</option>` +
+      jobs.map(j => `<option value="${esc(j.job_id)}">${esc(j.job_id)} (${j.calls} calls)</option>`).join("");
+    if (prev && [...sel.options].some(o => o.value === prev)) {
+      sel.value = prev;
+    }
+  } catch (_) {}
+}
+
+async function refreshConnections(btn) {
+  const orig = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Checking..."; }
+  try {
+    const res = await fetch("/api/v1/analytics/refresh-connections", { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.queue_state) updateQueueModeBadge(data.queue_state);
+      const pill = document.getElementById("colab-gpu-pill");
+      const g = data.gpu || {};
+      if (pill) {
+        if (g.loaded) {
+          pill.className = "p12-badge p12-badge-ok";
+          pill.textContent = `Live GPU (${g.engine || "vllm"}): ${g.vram_used_mb ?? g.vram_allocated_mb ?? 0}/${g.vram_total_mb ?? 0} MB · Active: ${g.active_requests ?? 0}`;
+        } else {
+          pill.className = "p12-badge p12-badge-err";
+          pill.textContent = `Qwen(C) GPU: ${g.status || "offline"}`;
+        }
+      }
+      await loadAnalytics();
+    }
+  } catch (e) {
+    console.error("Refresh connections error:", e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+async function clearAnalyticsTraces() {
+  const jobId = (document.getElementById("analytics-job-id")?.value || "").trim();
+  const scope = jobId ? `traces for job '${jobId}'` : "ALL historical API traces";
+  if (!confirm(`Clear ${scope}? (Professors and site trees are NOT affected.)`)) return;
+  try {
+    const url = jobId ? `/api/v1/analytics/traces?job_id=${encodeURIComponent(jobId)}` : "/api/v1/analytics/traces";
+    const res = await fetch(url, { method: "DELETE" });
+    if (res.ok) {
+      const sel = document.getElementById("analytics-job-id");
+      if (sel && sel.tagName === "SELECT") sel.value = "";
+      await loadAnalytics();
+    }
+  } catch (e) {
+    console.error("Clear traces error:", e);
+  }
+}
+
 async function loadAnalytics() {
+  await refreshAnalyticsJobsDropdown();
   const jobId = (document.getElementById("analytics-job-id")?.value || "").trim();
   const provider = document.getElementById("analytics-provider-filter")?.value || "";
   const statusFilter = document.getElementById("analytics-status-filter")?.value || "";
