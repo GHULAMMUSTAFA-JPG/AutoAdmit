@@ -60,6 +60,15 @@
     .copy-btn { border: 1px solid var(--border-subtle); background: #fff; color: var(--text-secondary); border-radius: 5px; padding: 2px 6px; font-size: 11px; cursor: pointer; margin-left: 4px; }
     .copy-btn:hover { background: var(--primary-subtle); color: var(--primary); border-color: #bfdbfe; }
 
+    /* 3-Dot Row Action Menu */
+    .action-menu-wrap { position: relative; display: inline-block; }
+    .action-dots-btn { border: 1px solid var(--border-subtle); background: #fff; color: var(--text-secondary); border-radius: 6px; width: 30px; height: 28px; font-size: 16px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .action-dots-btn:hover { background: #f1f5f9; color: var(--text-primary); border-color: var(--border-strong); }
+    .action-dropdown { position: absolute; right: 0; top: 32px; z-index: 40; min-width: 145px; background: #fff; border: 1px solid var(--border-subtle); border-radius: 8px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12); padding: 4px; display: none; }
+    .action-dropdown.open { display: block; }
+    .action-dropdown button { width: 100%; text-align: left; border: none; background: transparent; padding: 7px 10px; font-size: 12px; color: var(--text-primary); border-radius: 6px; cursor: pointer; display: block; }
+    .action-dropdown button:hover { background: #f1f5f9; color: var(--primary); }
+
     /* Analytics Provider Cards */
     .analytics-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
     @media (max-width: 1024px) { .analytics-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -276,7 +285,7 @@
                   <th>Verified Roster URL</th>
                   <th>Depts / Tokens</th>
                   <th>Verified Profs</th>
-                  <th style="width:210px;">Actions &amp; Export</th>
+                  <th style="width:56px; text-align:center;">&#8942;</th>
                 </tr>
               </thead>
               <tbody id="uni-table-body">

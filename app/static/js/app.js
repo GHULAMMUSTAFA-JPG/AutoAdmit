@@ -237,17 +237,34 @@ function renderUniversitiesTable() {
           <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${esc((u.token_stats && u.token_stats.total_tokens) ? `${u.token_stats.total_tokens} tok · ${u.token_stats.elapsed_sec ?? 0}s` : "—")}</div>
         </td>
         <td><strong style="color:${profCount > 0 ? "var(--accent-green)" : "var(--text-muted)"};">${esc(profCount)}</strong></td>
-        <td>
-          <div style="display:flex; gap:4px; flex-wrap:wrap;">
-            <button class="btn btn-secondary btn-sm" onclick="viewSiteTree('${esc(u.domain)}')">&#127795; View Tree</button>
-            <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(u.domain)}', 'csv')" title="Download ${esc(u.domain)} professors CSV">&#8681; CSV</button>
-            <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(u.domain)}', 'json')" title="Download ${esc(u.domain)} professors JSON">JSON</button>
+        <td style="text-align:center;">
+          <div class="action-menu-wrap">
+            <button class="action-dots-btn" onclick="toggleRowActionMenu(event, this)" title="Actions">&#8942;</button>
+            <div class="action-dropdown">
+              <button onclick="closeAllActionMenus(); viewSiteTree('${esc(u.domain)}')">&#127795; View Tree</button>
+              <button onclick="closeAllActionMenus(); downloadProfessors('${esc(u.domain)}', 'csv')">&#8681; Download CSV</button>
+              <button onclick="closeAllActionMenus(); downloadProfessors('${esc(u.domain)}', 'json')">&#8681; Download JSON</button>
+            </div>
           </div>
         </td>
       </tr>
     `;
   }).join("");
 }
+
+function closeAllActionMenus() {
+  document.querySelectorAll(".action-dropdown.open").forEach(el => el.classList.remove("open"));
+}
+
+function toggleRowActionMenu(ev, btn) {
+  ev.stopPropagation();
+  const menu = btn.nextElementSibling;
+  const wasOpen = menu && menu.classList.contains("open");
+  closeAllActionMenus();
+  if (menu && !wasOpen) menu.classList.add("open");
+}
+
+document.addEventListener("click", () => closeAllActionMenus());
 
 function readFilters() {
   const country = (document.getElementById("f-country")?.value || "China").trim();
