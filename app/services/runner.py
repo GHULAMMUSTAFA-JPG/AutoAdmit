@@ -16,6 +16,15 @@ from app.services.phase2_scraper import Phase2ScraperService
 
 logger = get_logger("services.runner")
 
+WORKER_TIMEOUT_SEC = 240.0
+
+
+def is_canary_sentinel_mismatch(error_code: Any, detail: str) -> bool:
+    """Detects systemic internal sentinel mismatches (e.g. literal 'roster_context' rejection) on Professor #1."""
+    code_s = str(getattr(error_code, "value", error_code) or "")
+    det_low = (detail or "").lower()
+    return code_s == "GROUNDING_FAILED" and ("roster_context" in det_low or "rostercontext" in det_low)
+
 
 class PipelineRunner:
     """Runs Phase 1 + Phase 2 through a controlled async queue (default max_concurrent_universities=2)."""
@@ -133,7 +142,6 @@ class PipelineRunner:
                         job.queue_mode = llm_router.queue_mode
                         job.active_concurrency = min(self._get_concurrency(), max(1, llm_router.active_concurrency))
 
-                        p1_res = await self.phase1.discover(dom, department, degree)
                         uni_found = 0
                         uni_verified = 0
                         uni_attempts = 0
@@ -142,11 +150,16 @@ class PipelineRunner:
                         roster_url: str | None = None
                         dept_url: str | None = None
                         row_status = "NEEDS_REVIEW"
+                        canary_alert: dict[str, Any] | None = None
 
-                        if not p1_res.ok:
-                            uni_err = {"domain": dom, "stage": "phase1", "error_code": p1_res.error_code, "detail": p1_res.detail}
-                            logger.warning("phase1_failed", job_id=jid, domain=dom, error_code=p1_res.error_code, detail=p1_res.detail)
-                        else:
+                        async def _process_one_university() -> None:
+                            nonlocal uni_found, uni_verified, uni_attempts, uni_err, win_strat, roster_url, dept_url, row_status, canary_alert
+                            p1_res = await self.phase1.discover(dom, department, degree)
+                            if not p1_res.ok:
+                                uni_err = {"domain": dom, "stage": "phase1", "error_code": p1_res.error_code, "detail": p1_res.detail}
+                                logger.warning("phase1_failed", job_id=jid, domain=dom, error_code=p1_res.error_code, detail=p1_res.detail)
+                                return
+
                             dept_doc = p1_res.data
                             win_strat = dept_doc.winning_strategy
                             roster_url = dept_doc.faculty_roster_url
@@ -161,22 +174,45 @@ class PipelineRunner:
                                 else:
                                     prof_urls = crawl_res.data["profile_urls"]
                                     roster_title = crawl_res.data.get("roster_title", "")
+                                    roster_mode = crawl_res.data.get("roster_mode", "BIO_LINKS")
+                                    inline_snap = crawl_res.data.get("inline_snapshot")
                                     uni_found = len(prof_urls)
-                                    logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found, used_playwright=crawl_res.data.get("used_playwright", False))
+                                    logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found, roster_mode=roster_mode, used_playwright=crawl_res.data.get("used_playwright", False))
 
-                                    for prof_url in prof_urls:
-                                        snap_res = await self.scraper.fetch_and_snapshot_profile(prof_url, dom)
-                                        if not snap_res.ok:
-                                            logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code=snap_res.error_code)
-                                            continue
-                                        uni_attempts += 1
-                                        ext_res = await self.extractor.extract_from_snapshot(
-                                            snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
+                                    if roster_mode == "INLINE_TABLE" and inline_snap is not None:
+                                        profs = await self.extractor.extract_inline_table_professors(
+                                            inline_snap, department=department, source_roster_url=roster_url, roster_title=roster_title
                                         )
-                                        if ext_res.ok:
-                                            uni_verified += 1
-                                        else:
-                                            logger.warning("phase2_extract_rejected", job_id=jid, domain=dom, url=prof_url, error_code=ext_res.error_code, detail=ext_res.detail)
+                                        uni_found = max(uni_found, len(profs))
+                                        uni_attempts += max(1, len(profs))
+                                        uni_verified += len(profs)
+                                    else:
+                                        canary_checked = False
+                                        for idx, prof_url in enumerate(prof_urls):
+                                            snap_res = await self.scraper.fetch_and_snapshot_profile(prof_url, dom)
+                                            if not snap_res.ok:
+                                                logger.warning("phase2_snapshot_failed", job_id=jid, domain=dom, url=prof_url, error_code=snap_res.error_code)
+                                                continue
+                                            uni_attempts += 1
+                                            ext_res = await self.extractor.extract_from_snapshot(
+                                                snap_res.data, department=department, source_roster_url=roster_url, roster_title=roster_title
+                                            )
+                                            if ext_res.ok:
+                                                uni_verified += 1
+                                            else:
+                                                logger.warning("phase2_extract_rejected", job_id=jid, domain=dom, url=prof_url, error_code=ext_res.error_code, detail=ext_res.detail)
+                                                # Step 2 Pre-Flight Canary Gate on Professor #1 when batch > 3
+                                                if not canary_checked and len(prof_urls) > 3 and is_canary_sentinel_mismatch(ext_res.error_code, ext_res.detail or ""):
+                                                    canary_alert = {
+                                                        "domain": dom,
+                                                        "stage": "phase2_canary",
+                                                        "error_code": "CANARY_VALIDATION_ALERT",
+                                                        "detail": f"Canary prof #1 ({prof_url}) failed with internal sentinel mismatch: {ext_res.detail}",
+                                                    }
+                                                    uni_err = canary_alert
+                                                    logger.error("canary_validation_alert", job_id=jid, domain=dom, url=prof_url, detail=ext_res.detail)
+                                                    break
+                                            canary_checked = True
 
                             # NEVER mark 0 verified professors as COMPLETE -> downgrade to NEEDS_REVIEW
                             if uni_verified > 0:
@@ -199,12 +235,35 @@ class PipelineRunner:
                                         faculty_roster_url=roster_url,
                                         winning_strategy=win_strat,
                                         status="NEEDS_REVIEW",
-                                        error_code="ZERO_VERIFIED_PROFESSORS",
+                                        error_code=uni_err["error_code"],
                                     )
                                 )
                                 logger.warning("zero_verified_downgraded", job_id=jid, domain=dom, found=uni_found)
 
+                        try:
+                            await asyncio.wait_for(_process_one_university(), timeout=WORKER_TIMEOUT_SEC)
+                        except asyncio.TimeoutError:
+                            row_status = "NEEDS_REVIEW"
+                            uni_err = {
+                                "domain": dom,
+                                "stage": "worker_timeout",
+                                "error_code": "WORKER_TIMEOUT",
+                                "detail": f"University worker exceeded {int(WORKER_TIMEOUT_SEC)}s timeout.",
+                            }
+                            logger.error("university_worker_timeout", job_id=jid, domain=dom, timeout_sec=WORKER_TIMEOUT_SEC)
+                        except Exception as exc:
+                            row_status = "NEEDS_REVIEW"
+                            uni_err = {
+                                "domain": dom,
+                                "stage": "worker_exception",
+                                "error_code": type(exc).__name__,
+                                "detail": f"{type(exc).__name__}: {exc}",
+                            }
+                            logger.error("university_worker_exception", job_id=jid, domain=dom, error=f"{type(exc).__name__}: {exc}")
+
                         async with checkpoint_lock:
+                            if canary_alert:
+                                job.scorecard["canary_validation_alert"] = canary_alert
                             strategies[win_strat] += 1
                             job.scorecard["winning_strategies"] = dict(strategies)
                             job.scorecard["grounding_attempts"] = job.scorecard.get("grounding_attempts", 0) + uni_attempts

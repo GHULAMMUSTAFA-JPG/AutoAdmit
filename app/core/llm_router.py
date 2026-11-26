@@ -354,11 +354,23 @@ class LLMRouter:
         if not endpoints:
             return StepResult.fail(ErrorCode.LLM_ERROR, "No LLM API keys configured.")
 
-        # Precompute deterministic token breakdown for ledger
+        # Precompute deterministic token breakdown for ledger (fallback to prompt header prefix when no explicit system message)
         sys_text = "\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
         user_text = "\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
-        sys_tok = estimate_tokens(sys_text)
-        page_tok = estimate_tokens(user_text)
+        if not sys_text and user_text:
+            # Estimate instruction header before Markdown/Links payload as system_prompt_tokens
+            split_idx = -1
+            for marker in ("\nMarkdown:", "\nLinks:", "\nSample Links:", "\nAvailable links:"):
+                pos = user_text.find(marker)
+                if pos > 0:
+                    split_idx = pos
+                    break
+            header_slice = user_text[:split_idx] if split_idx > 0 else user_text[: min(360, len(user_text))]
+            sys_tok = max(1, estimate_tokens(header_slice))
+            page_tok = max(0, estimate_tokens(user_text) - sys_tok)
+        else:
+            sys_tok = estimate_tokens(sys_text)
+            page_tok = estimate_tokens(user_text)
         orig_md_tok = max(0, int(original_markdown_chars / 3.2)) if original_markdown_chars else page_tok
         sent_md_tok = max(0, int(sent_markdown_chars / 3.2)) if sent_markdown_chars else page_tok
         req_preview = json.dumps(messages, ensure_ascii=False)[:8000]

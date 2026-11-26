@@ -13,6 +13,7 @@ from app.schemas.entities import JobDoc, UniversityDeptDoc, utc_now
 from app.schemas.filters import AdminConfig, parse_tier_limit
 from app.services.phase2_extractor import Phase2ExtractorService
 from app.services.phase2_scraper import Phase2ScraperService
+from app.services.runner import WORKER_TIMEOUT_SEC, is_canary_sentinel_mismatch
 from app.services.site_tree_builder import SiteTreeBuilder
 from scripts.seed_universities import filter_university_seeds
 
@@ -79,7 +80,19 @@ async def _run_tree_build_job(
                 dom_token = current_domain.set(dom)
                 try:
                     job.university_details[dom]["status"] = "RUNNING"
-                    res = await builder.build_and_find_roster(dom, department, degree, force_refresh=force_refresh)
+                    try:
+                        res = await asyncio.wait_for(
+                            builder.build_and_find_roster(dom, department, degree, force_refresh=force_refresh),
+                            timeout=WORKER_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        from app.core.types import StepResult
+                        res = StepResult.fail("WORKER_TIMEOUT", f"Tree builder exceeded {int(WORKER_TIMEOUT_SEC)}s timeout.")  # type: ignore[arg-type]
+                        logger.error("tree_worker_timeout", job_id=jid, domain=dom, timeout_sec=WORKER_TIMEOUT_SEC)
+                    except Exception as exc:
+                        from app.core.types import StepResult
+                        res = StepResult.fail(type(exc).__name__, f"{type(exc).__name__}: {exc}")  # type: ignore[arg-type]
+                        logger.error("tree_worker_exception", job_id=jid, domain=dom, error=f"{type(exc).__name__}: {exc}")
                     async with lock:
                         if res.ok:
                             data = res.data
@@ -291,16 +304,33 @@ async def _run_tree_extract_job(
                     uni_attempts = 0
                     uni_skipped = 0
                     uni_err: dict[str, Any] | None = None
+                    canary_alert: dict[str, Any] | None = None
 
-                    crawl_res = await scraper.crawl_roster_urls(roster_url)
-                    if not crawl_res.ok:
-                        uni_err = {"domain": dom, "stage": "phase2_crawl", "error_code": crawl_res.error_code, "detail": crawl_res.detail}
-                        logger.warning("phase2_crawl_failed", job_id=jid, domain=dom, error_code=crawl_res.error_code, detail=crawl_res.detail)
-                    else:
+                    async def _extract_one_uni() -> None:
+                        nonlocal uni_found, uni_verified, uni_attempts, uni_skipped, uni_err, canary_alert
+                        crawl_res = await scraper.crawl_roster_urls(roster_url)
+                        if not crawl_res.ok:
+                            uni_err = {"domain": dom, "stage": "phase2_crawl", "error_code": crawl_res.error_code, "detail": crawl_res.detail}
+                            logger.warning("phase2_crawl_failed", job_id=jid, domain=dom, error_code=crawl_res.error_code, detail=crawl_res.detail)
+                            return
+
                         prof_urls = crawl_res.data["profile_urls"]
                         roster_title = crawl_res.data.get("roster_title", "")
+                        roster_mode = crawl_res.data.get("roster_mode", "BIO_LINKS")
+                        inline_snap = crawl_res.data.get("inline_snapshot")
                         uni_found = len(prof_urls)
-                        logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found)
+                        logger.info("phase2_crawl_done", job_id=jid, domain=dom, profiles_found=uni_found, roster_mode=roster_mode)
+
+                        if roster_mode == "INLINE_TABLE" and inline_snap is not None:
+                            profs = await extractor.extract_inline_table_professors(
+                                inline_snap, department=department, source_roster_url=roster_url, roster_title=roster_title
+                            )
+                            uni_found = max(uni_found, len(profs))
+                            uni_attempts += max(1, len(profs))
+                            uni_verified += len(profs)
+                            return
+
+                        canary_checked = False
                         for prof_url in prof_urls:
                             # $0 Resume: skip already-VERIFIED professors unless force_reextract=True
                             if not force_reextract:
@@ -322,6 +352,36 @@ async def _run_tree_extract_job(
                                 uni_verified += 1
                             else:
                                 logger.warning("phase2_extract_rejected", job_id=jid, domain=dom, url=prof_url, error_code=ext_res.error_code, detail=ext_res.detail)
+                                if not canary_checked and len(prof_urls) > 3 and is_canary_sentinel_mismatch(ext_res.error_code, ext_res.detail or ""):
+                                    canary_alert = {
+                                        "domain": dom,
+                                        "stage": "phase2_canary",
+                                        "error_code": "CANARY_VALIDATION_ALERT",
+                                        "detail": f"Canary prof #1 ({prof_url}) failed with internal sentinel mismatch: {ext_res.detail}",
+                                    }
+                                    uni_err = canary_alert
+                                    logger.error("canary_validation_alert", job_id=jid, domain=dom, url=prof_url, detail=ext_res.detail)
+                                    break
+                            canary_checked = True
+
+                    try:
+                        await asyncio.wait_for(_extract_one_uni(), timeout=WORKER_TIMEOUT_SEC)
+                    except asyncio.TimeoutError:
+                        uni_err = {
+                            "domain": dom,
+                            "stage": "worker_timeout",
+                            "error_code": "WORKER_TIMEOUT",
+                            "detail": f"Extraction worker exceeded {int(WORKER_TIMEOUT_SEC)}s timeout.",
+                        }
+                        logger.error("tree_extract_worker_timeout", job_id=jid, domain=dom, timeout_sec=WORKER_TIMEOUT_SEC)
+                    except Exception as exc:
+                        uni_err = {
+                            "domain": dom,
+                            "stage": "worker_exception",
+                            "error_code": type(exc).__name__,
+                            "detail": f"{type(exc).__name__}: {exc}",
+                        }
+                        logger.error("tree_extract_worker_exception", job_id=jid, domain=dom, error=f"{type(exc).__name__}: {exc}")
 
                     row_status = "COMPLETE" if uni_verified > 0 else "NEEDS_REVIEW"
                     if uni_verified == 0 and not uni_err:
@@ -346,6 +406,8 @@ async def _run_tree_extract_job(
                     )
 
                     async with lock:
+                        if canary_alert:
+                            job.scorecard["canary_validation_alert"] = canary_alert
                         job.queue_mode = llm_router.queue_mode
                         job.active_concurrency = min(max(1, admin.max_concurrent_universities), max(1, llm_router.active_concurrency))
                         job.scorecard["mode"] = "TREE_EXTRACT"

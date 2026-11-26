@@ -37,7 +37,11 @@ def extract_visible_links(html: str, base_url: str, max_links: int = 60) -> list
 
 
 async def _default_playwright_fetch(url: str) -> tuple[int, str, str]:
-    """Renders a page with headless Chromium in a worker thread."""
+    """
+    Renders a page with headless Chromium in a worker thread:
+    - Auto-resolves Chinese university JS-cookie WAFs (HTTP 412/202/503 or <800B HTML with <script>) via 2500ms wait + reload.
+    - Waits 800ms on tsites faculty pages (`faculty.*.edu.cn`) for JS email hydration.
+    """
     def _run() -> tuple[int, str, str]:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -48,7 +52,17 @@ async def _default_playwright_fetch(url: str) -> tuple[int, str, str]:
                 resp = page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(1000)
                 status = resp.status if resp else 200
-                return status, page.url, page.content()
+                html = page.content()
+                if status in (412, 202, 503) or (len(html) < 800 and "<script" in html.lower()):
+                    page.wait_for_timeout(2500)
+                    resp2 = page.reload(wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_timeout(1000)
+                    status = resp2.status if resp2 else status
+                    html = page.content()
+                if "faculty." in (page.url or "").lower():
+                    page.wait_for_timeout(800)
+                    html = page.content()
+                return status, page.url, html
             finally:
                 browser.close()
 

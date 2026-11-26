@@ -113,6 +113,7 @@ class VerifiedRosterEntry(BaseModel):
     roster_url: str
     department_url: str | None = None
     strategy: str = "TREE_DFS"
+    roster_mode: Literal["BIO_LINKS", "INLINE_TABLE"] = "BIO_LINKS"
     candidate_profile_count: int = 0
     verified_at: datetime = Field(default_factory=utc_now)
 
@@ -201,3 +202,16 @@ class Phase2LinkAuditDoc(BaseModel):
     kept_count: int = 0
     dropped_breakdown: dict[str, int] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class DomainPlaybookDoc(BaseModel):
+    """Self-learning CMS & Domain Playbook persisted in `domain_playbooks`."""
+    domain: str
+    cms_fingerprint: str = "unknown"
+    requires_playwright_waf_reload: bool = False
+    verified_dept_url: str = ""
+    verified_roster_urls: list[str] = Field(default_factory=list)
+    roster_mode: Literal["BIO_LINKS", "INLINE_TABLE"] = "BIO_LINKS"
+    last_failure_code: str = ""
+    learned_notes: str = ""
+    updated_at: datetime = Field(default_factory=utc_now)

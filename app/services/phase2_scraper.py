@@ -25,11 +25,16 @@ from app.services.phase1_discovery import decode_bytes_safely
 logger = get_logger("services.phase2_scraper")
 
 SURNAMES = set(
-    "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌毕单季裴霍涂成苗谷盛曲翁冉骆蓝路游辛靳管柴蒙鲍华喻祁蒲房滕屈饶解牟艾尤阳时穆农司卓古吉缪简车项连芦麦褚娄窦戚岑景党宫费卜冷晏席卫米柏宗瞿桂全佟应臧闵苟邬边卞姬师"
+    "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌毕单季裴霍涂成苗谷盛曲翁冉骆蓝路游辛靳管柴蒙鲍华喻祁蒲房滕屈饶解牟艾尤阳时穆农司卓古吉缪简车项连芦麦褚娄窦戚岑景党宫费卜冷晏席卫米柏宗瞿桂全佟应臧闵苟邬边卞姬师阚敖查储谌笪刁凤伏傅盖海杭赫洪花居鞠赖郎劳乐厉利廉麻满茅明皮平强裘阙荣容芮桑沙商束帅双水松谈危温闻巫奚习鲜萧宣荀阎印雍虞宇郁元云甄诸竺"
 )
 CJK_NAME_RE = re.compile(r"^[\u4e00-\u9fa5·]{2,4}$")
 EN_NAME_RE = re.compile(r"^[A-Z][a-z]+(?: [A-Z][a-z\-]+){1,2}$")
 TITLE_BRACKET_RE = re.compile(r"[\(\（\[【].*?[\)\）\]】]|教授|副教授|研究员|副研究员|博导|硕导|博士|老师|Prof\.|Dr\.")
+ROLE_PREFIX_RE = re.compile(
+    r"^(?:导师简介|教师简介|个人简介|个人主页|专家简介)\s*(?:——|—|-|:|：)+\s*"
+)
+INLINE_ROSTER_TITLE_WORDS = ("师资队伍", "硕士生导师", "博士生导师", "研究生导师", "教师名录", "导师介绍", "导师队伍", "faculty", "supervisors")
+INLINE_FACULTY_RANK_WORDS = ("教授", "副教授", "讲师", "研究员", "硕士生导师", "博士生导师", "博导", "硕导")
 DETAIL_ANCHOR_TEXTS = {"查看详情", "详情", "个人主页", "view details", "details", "profile", "more"}
 NEXT_PAGE_TEXTS = {"下一页", "下页", "next", ">", "›", "»"}
 
@@ -40,16 +45,17 @@ NON_PROFILE_URL_DENYLIST = (
     "/careers", "/career", "/login", "/intllogin", "/open_position",
     "/internationalization", "/schools___colleges/", "/campus", "/alumni",
     "/contact", "/download", "/xwdt", "/tzgg", "/zsjy", "/kygk",
+    "publications/", "news/", "notice/",
 )
 NON_PROFILE_ANCHOR_DENYLIST = (
     "about us", "about", "news", "notice", "events", "admissions", "overview",
     "research", "academics", "global", "careers", "login", "sign in", "contact",
     "首页", "学院概况", "新闻动态", "通知公告", "招生信息", "科学研究", "人才培养",
-    "合作交流", "党群工作", "联系我们", "统一身份认证", "更多", "返回",
+    "合作交流", "党群工作", "联系我们", "统一身份认证", "更多", "返回", "毕业留影",
 )
 FACULTY_PROFILE_URL_PATTERNS = (
     "/faculty/", "/people/", "/teacher/", "/teachers/", "/szdw/", "/jsml/",
-    "/info/", "/profile/", "/staff/", "/dsjs/", "/jsjj/",
+    "/info/", "/profile/", "/staff/", "/dsjs/", "/jsjj/", "/dsjj/",
 )
 GLOBAL_CHROME_SELECTORS = (
     "header", "nav", "footer", "aside", ".nav", "#nav", ".sidebar", ".left-menu",
@@ -62,7 +68,10 @@ CAROUSEL_SELECTORS = (
     '[class*="carousel"]', '[class*="swiper"]', '[class*="slider"]', '[class*="slick"]',
 )
 NEWS_DATE_PATH_RE = re.compile(r"/202[0-9]/[0-9]{4}/")
-ADMIN_SLUG_DENYLIST = ("openpositions", "djgz", "dqgz", "ndjj", "xygk", "szgk")
+ADMIN_SLUG_DENYLIST = (
+    "openpositions", "djgz", "dqgz", "ndjj", "xygk", "szgk",
+    "xygz", "byly", "xsgz", "twgz", "tzgg", "publications/",
+)
 ORG_NAME_REJECT_KEYWORDS = (
     "学院", "学系", "研究院", "研究所", "中心", "学部",
     "school", "department", "college", "institute", "center", "university",
@@ -164,19 +173,40 @@ def compute_sha256(text: str) -> str:
 
 
 def is_plausible_person_name(raw: str) -> bool:
-    """Validates person-name anchors while strictly rejecting organizational/school/college names."""
+    """Validates person-name anchors (stripping '导师简介——' prefixes) while strictly rejecting org/school names."""
     text = (raw or "").strip()
     if not text:
         return False
     low = text.lower()
     if any(kw in low for kw in ORG_NAME_REJECT_KEYWORDS):
         return False
+    text = ROLE_PREFIX_RE.sub("", text).strip()
     cleaned = TITLE_BRACKET_RE.sub("", text).strip()
     if not cleaned:
         return False
     if CJK_NAME_RE.match(cleaned) and cleaned[0] in SURNAMES:
         return True
     return bool(EN_NAME_RE.match(cleaned))
+
+
+def detect_inline_table_roster(html: str, url: str) -> tuple[bool, int]:
+    """
+    Archetype B (Single-Page / Inline Table Roster) detector:
+    Returns (True, title_occurrences) when a faculty/supervisor page lists >= 4 academic rank occurrences
+    directly in main body text/tables without separate per-professor bio links.
+    """
+    if not html or not url or is_root_or_index_url(url):
+        return False, 0
+    bc = extract_breadcrumb_markers(html).lower()
+    if not any(w in bc or w in (url or "").lower() for w in INLINE_ROSTER_TITLE_WORDS):
+        return False, 0
+    tree = LexborHTMLParser(html)
+    for sel in (*GLOBAL_CHROME_SELECTORS, *CAROUSEL_SELECTORS, "script", "style"):
+        for node in tree.css(sel):
+            node.decompose()
+    body_text = tree.text(separator=" ", strip=True) or ""
+    hits = sum(body_text.count(w) for w in INLINE_FACULTY_RANK_WORDS)
+    return hits >= 4, hits
 
 
 _looks_like_person_name = is_plausible_person_name
@@ -413,6 +443,7 @@ class Phase2ScraperService:
                         timeout=15.0,
                     )
                     st, final_url, html = resp.status_code, str(resp.url), decode_bytes_safely(resp.content)
+                    md_len = len(clean_html_to_markdown(html)[0]) if html else 0
                     await self._log_fetch_trace(
                         stage="phase2a_roster",
                         url=final_url,
@@ -421,7 +452,7 @@ class Phase2ScraperService:
                         status_code=st,
                         error_detail="" if st == 200 else f"HTTP {st}",
                         html_bytes=len(resp.content),
-                        markdown_chars=0,
+                        markdown_chars=md_len,
                         latency_ms=int((time.perf_counter() - t0) * 1000),
                     )
                 except Exception as exc:
@@ -445,6 +476,7 @@ class Phase2ScraperService:
                         st, final_url, html = await self.playwright_fetcher(current_url)
                         used_playwright = True
                         fetch_err = ""
+                        md_len_pw = len(clean_html_to_markdown(html)[0]) if html else 0
                         await self._log_fetch_trace(
                             stage="phase2a_roster",
                             url=final_url,
@@ -453,7 +485,7 @@ class Phase2ScraperService:
                             status_code=st,
                             error_detail="",
                             html_bytes=len((html or "").encode("utf-8")),
-                            markdown_chars=0,
+                            markdown_chars=md_len_pw,
                             latency_ms=int((time.perf_counter() - t_pw) * 1000),
                         )
                     except Exception as pw_exc:
@@ -487,6 +519,7 @@ class Phase2ScraperService:
                         st, final_url, html = await self.playwright_fetcher(final_url)
                         links, audit = extract_profile_urls_with_audit(html, final_url, root_domain=root_dom)
                         used_playwright = True
+                        md_len_spa = len(clean_html_to_markdown(html)[0]) if html else 0
                         await self._log_fetch_trace(
                             stage="phase2a_roster_spa",
                             url=final_url,
@@ -495,7 +528,7 @@ class Phase2ScraperService:
                             status_code=st,
                             error_detail="",
                             html_bytes=len((html or "").encode("utf-8")),
-                            markdown_chars=0,
+                            markdown_chars=md_len_spa,
                             latency_ms=int((time.perf_counter() - t_pw) * 1000),
                         )
                     except Exception as exc:
@@ -529,10 +562,27 @@ class Phase2ScraperService:
         except Exception:
             pass
 
+        roster_mode = "BIO_LINKS"
+        inline_snapshot = None
+        if len(profile_urls) < 3 and html:
+            is_inline, _ = detect_inline_table_roster(html, roster_url)
+            if is_inline:
+                roster_mode = "INLINE_TABLE"
+                md_inline, bc_inline = clean_html_to_markdown(html)
+                inline_snapshot = PageSnapshotDoc(
+                    url=roster_url,
+                    domain=root_dom or current_domain.get() or "",
+                    markdown=md_inline,
+                    breadcrumb=bc_inline,
+                    sha256=compute_sha256(md_inline),
+                )
+
         return StepResult.success({
             "profile_urls": profile_urls,
             "used_playwright": used_playwright,
             "roster_title": roster_title,
+            "roster_mode": roster_mode,
+            "inline_snapshot": inline_snapshot,
             "link_audit": {"total_links": agg_total_links, "kept_count": len(profile_urls), "dropped_breakdown": agg_dropped},
         })
 

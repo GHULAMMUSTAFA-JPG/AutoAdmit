@@ -26,14 +26,17 @@ class MongoManager:
             self.client = AsyncIOMotorClient(
                 self.uri,
                 maxPoolSize=50,
-                serverSelectionTimeoutMS=5000,
+                serverSelectionTimeoutMS=10000,
             )
             self.db = self.client[self.db_name]
-            try:
-                await ensure_permanent_indexes(self.db)
-            except (AutoReconnect, ServerSelectionTimeoutError):
-                await asyncio.sleep(0.5)
-                await ensure_permanent_indexes(self.db)
+            for attempt in range(3):
+                try:
+                    await ensure_permanent_indexes(self.db)
+                    break
+                except (AutoReconnect, ServerSelectionTimeoutError):
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(1.0)
             logger.info("mongo_connected", db_name=self.db_name)
         assert self.db is not None
         return self.db
@@ -106,6 +109,11 @@ async def ensure_permanent_indexes(db: AsyncIOMotorDatabase) -> None:
 
     await db["system_state"].create_indexes([
         IndexModel([("key", ASCENDING)], unique=True, name="uniq_system_state_key"),
+    ])
+
+    await db["domain_playbooks"].create_indexes([
+        IndexModel([("domain", ASCENDING)], unique=True, name="uniq_playbook_domain"),
+        IndexModel([("cms_fingerprint", ASCENDING)], name="idx_playbook_cms"),
     ])
     logger.info("permanent_indexes_verified")
 

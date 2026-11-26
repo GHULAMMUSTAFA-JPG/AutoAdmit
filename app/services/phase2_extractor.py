@@ -16,10 +16,15 @@ from app.schemas.filters import AdminConfig
 logger = get_logger("services.phase2_extractor")
 
 MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
-PHOTO_SKIP_PATTERNS = ("logo", "banner", "icon", "qr", "wechat", "weixin", "email", "mail", "arrow", "bg", "footer", "header")
+PHOTO_SKIP_PATTERNS = (
+    "search", "logo", "banner", "icon", "btn", "login", "default", "avatar_default",
+    "qr", "wechat", "weixin", "email", "mail", "arrow", "bg", "footer", "header", ".svg",
+)
+STRICT_EMAIL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._%+-]{1,63}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+HEX_HASH_RE = re.compile(r"^[0-9a-f]{32,}$", re.I)
 
 EMAIL_RE = re.compile(
-    r"(?:mailto:)?([a-zA-Z0-9_.+-]+(?:\s*(?:\[at\]|\(at\)|\bat\b|#|@)\s*)[a-zA-Z0-9-]+(?:\s*(?:\[dot\]|\(dot\)|\bdot\b|\.)\s*[a-zA-Z0-9-]+)+)",
+    r"(?:mailto:)?([a-zA-Z0-9][a-zA-Z0-9_.+-]{1,63}(?:\s*(?:\[at\]|\(at\)|\bat\b|#|@)\s*)[a-zA-Z0-9-]+(?:\s*(?:\[dot\]|\(dot\)|\bdot\b|\.)\s*[a-zA-Z0-9-]+)+)",
     re.I,
 )
 PHD_NEGATION_RE = re.compile(r"(?:非\s*(?:博导|博士生导师)|(?:博导|博士生导师)\s*[:：]\s*(?:否|无|不是))")
@@ -30,20 +35,40 @@ EXPLICIT_NO_RECRUIT_RE = re.compile(
 )
 FACULTY_RANK_KEYWORDS = (
     "professor", "associate professor", "assistant professor", "researcher",
-    "教授", "副教授", "研究员", "副研究员", "博导", "硕导", "博士生导师", "硕士生导师",
+    "教授", "副教授", "研究员", "副研究员", "讲席教授", "博导", "硕导", "博士生导师", "硕士生导师",
 )
+VERIFIED_FACULTY_ROSTER_TOKENS = ("szdw", "js", "ds", "teacherlist", "yjsds", "faculty", "people", "ssyjsds", "dsjj", "师资", "导师")
 GRAD_ROSTER_HINTS = ("硕士生导师", "博士生导师", "博导", "硕导", "yjsds", "ssyjsds", "sssds", "bsds", "supervisor")
+
+
+def is_valid_photo_url(url: str) -> bool:
+    """Rejects generic UI icons (search.png, logo, btn, default, .svg) and data URIs."""
+    raw = (url or "").strip()
+    if not raw or raw.startswith("data:"):
+        return False
+    low = raw.lower()
+    if any(skip in low for skip in PHOTO_SKIP_PATTERNS):
+        return False
+    return True
+
+
+def is_valid_email(email: str) -> bool:
+    """Strict email validator rejecting leading underscores (_t@), >80-char strings, and RSA/hex cipher hashes."""
+    e = (email or "").strip().lower()
+    if not e or len(e) > 80:
+        return False
+    if HEX_HASH_RE.match(e.split("@")[0]):
+        return False
+    return bool(STRICT_EMAIL_RE.match(e))
 
 
 def extract_photo_url_from_markdown(markdown: str, base_url: str) -> str:
     """Deterministically finds the first plausible portrait/photo URL in Markdown and resolves it to an absolute URL."""
     for m in MD_IMG_RE.finditer(markdown or ""):
         raw = m.group(1).strip().strip("\"'")
-        if not raw or raw.startswith("data:"):
+        if not is_valid_photo_url(raw):
             continue
         low = raw.lower()
-        if any(skip in low for skip in PHOTO_SKIP_PATTERNS):
-            continue
         if low.endswith((".jpg", ".jpeg", ".png", ".webp")) or "/__local/" in low or "/upload" in low or "/photo" in low:
             return urljoin(base_url, raw)
     return ""
@@ -78,7 +103,7 @@ def decode_obfuscated_email(raw: str) -> str:
     clean = re.sub(r"\s*(?:\[at\]|\(at\)|\bat\b|#)\s*", "@", raw or "", flags=re.I)
     clean = re.sub(r"\s*(?:\[dot\]|\(dot\)|\bdot\b)\s*", ".", clean, flags=re.I)
     clean = re.sub(r"\s+", "", clean).strip().lower()
-    if "@" in clean and "." in clean.split("@")[-1]:
+    if is_valid_email(clean):
         return clean
     return ""
 
@@ -124,6 +149,16 @@ def _roster_implies_degrees(source_roster_url: str, roster_title: str = "") -> l
     return inferred
 
 
+def _is_verified_faculty_roster(source_roster_url: str, roster_title: str = "") -> bool:
+    blob = f"{source_roster_url} {roster_title}".lower()
+    return any(tok in blob for tok in VERIFIED_FACULTY_ROSTER_TOKENS)
+
+
+def _bio_has_faculty_rank(markdown: str, breadcrumb: str = "") -> bool:
+    norm_low = normalize_nfkc(f"{markdown} {breadcrumb}").lower()
+    return any(rk in norm_low for rk in FACULTY_RANK_KEYWORDS)
+
+
 def verify_grounding(
     markdown: str,
     breadcrumb: str,
@@ -133,7 +168,7 @@ def verify_grounding(
     source_roster_url: str = "",
     roster_title: str = "",
 ) -> tuple[bool, str]:
-    """NFKC + full-width/zero-width whitespace-stripped Grounding Gate (with roster_context support)."""
+    """NFKC + full-width/zero-width whitespace-stripped Grounding Gate (with resilient roster_context support)."""
     norm_md = normalize_for_grounding(markdown)
     norm_bc = normalize_for_grounding(breadcrumb)
     combined = f"{norm_md}{norm_bc}"
@@ -143,12 +178,14 @@ def verify_grounding(
     if not nq or nq not in norm_md:
         return False, f"name_evidence_quote '{name_quote}' not found verbatim in Markdown."
 
-    # Allow 'roster_context' when verified parent roster URL/title explicitly indicates graduate supervisors
-    if sq.lower() in ("roster_context", "rostercontext") and _roster_implies_degrees(source_roster_url, roster_title):
-        return True, ""
+    # Never search Markdown literally for the sentinel string 'roster_context'
+    if (supervisor_quote or "").strip().lower() in ("roster_context", "rostercontext"):
+        if _is_verified_faculty_roster(source_roster_url, roster_title) or _bio_has_faculty_rank(markdown, breadcrumb):
+            return True, ""
+        return False, "supervisor_evidence_quote 'roster_context' requires verified faculty roster or faculty rank in bio."
 
     if not sq or sq not in combined:
-        if _roster_implies_degrees(source_roster_url, roster_title):
+        if _roster_implies_degrees(source_roster_url, roster_title) or _bio_has_faculty_rank(markdown, breadcrumb):
             return True, ""
         return False, f"supervisor_evidence_quote '{supervisor_quote}' not found verbatim in Markdown or breadcrumb."
     return True, ""
@@ -198,11 +235,12 @@ class Phase2ExtractorService:
             '"research_areas_en": [str], "photo_url": str, '
             '"name_evidence_quote": str, "supervisor_evidence_quote": str}\n'
             "Rules:\n"
-            "- Copy name_evidence_quote and supervisor_evidence_quote VERBATIM from the Markdown or Breadcrumb.\n"
-            "- If the parent verified roster explicitly indicates Master's/PhD supervisors and the bio omits repeating it, set supervisor_evidence_quote to \"roster_context\".\n"
+            "- FIRST copy an actual verbatim academic rank or supervisor phrase from the Markdown or Breadcrumb into supervisor_evidence_quote (e.g. 教授, 副教授, 研究员, 博导, 硕导, 博士生导师, 硕士生导师, Professor, Associate Professor).\n"
+            "- ONLY output \"roster_context\" for supervisor_evidence_quote when the individual bio page completely omits repeating rank/supervisor words.\n"
+            "- Copy name_evidence_quote VERBATIM from the Markdown.\n"
             "- Provide concise English translations/romanizations for name_en, title_en, and research_areas_en.\n"
-            "- If a portrait/profile image URL appears in the Markdown, put it in photo_url (else empty string).\n"
-            "- Do NOT invent emails or quotes.\n\n"
+            "- If a real portrait photo URL appears in the Markdown (ignore search/logo/icon/banner), put it in photo_url (else empty string).\n"
+            "- Do NOT invent emails or quotes, and NEVER output hex cipher strings as emails.\n\n"
             f"{roster_ctx_line}\n"
             f"Breadcrumb: {snapshot.breadcrumb}\n"
             f"Markdown:\n{sent_md}"
@@ -244,10 +282,12 @@ class Phase2ExtractorService:
             areas_en = list(interests)
 
         raw_photo = str(parsed.get("photo_url") or "").strip()
-        if raw_photo and not raw_photo.startswith("data:"):
+        if raw_photo and is_valid_photo_url(raw_photo):
             photo_url = urljoin(snapshot.url, raw_photo)
         else:
             photo_url = extract_photo_url_from_markdown(snapshot.markdown, snapshot.url)
+        if not is_valid_photo_url(photo_url):
+            photo_url = ""
 
         # 1. NFKC + Whitespace-Stripped Grounding Gate (with roster_context support)
         grounded, reason = verify_grounding(
@@ -302,14 +342,14 @@ class Phase2ExtractorService:
             )
             return StepResult.fail(ErrorCode.NEGATED_SUPERVISOR, detail)
 
-        # 3. Email resolution (handles obfuscated at/dot/# emails too; never drop professor if email is missing)
-        email = regex_email
-        email_status = regex_status
+        # 3. Email resolution (strict validator rejecting _t@ and RSA/hex hashes; never drop professor if email is missing)
+        email = regex_email if is_valid_email(regex_email) else ""
+        email_status = "FOUND" if email else (regex_status if regex_status == "IMAGE_EMBEDDED" else "MISSING")
         if not email:
             raw_llm_email = str(parsed.get("email") or "").strip()
             decoded_llm = decode_obfuscated_email(raw_llm_email)
             norm_md_low = normalize_for_grounding(snapshot.markdown).lower()
-            if decoded_llm:
+            if decoded_llm and is_valid_email(decoded_llm):
                 local_part, dom_part = decoded_llm.split("@", 1)
                 if decoded_llm in norm_md_low or (local_part in norm_md_low and dom_part.split(".")[0] in norm_md_low):
                     email = decoded_llm
@@ -338,6 +378,93 @@ class Phase2ExtractorService:
         await self.repo.upsert_professor(prof)
         logger.info("professor_upserted", url=prof.canonical_profile_url, name=prof.name, email_status=prof.email_status)
         return StepResult.success(prof)
+
+    async def extract_inline_table_professors(
+        self,
+        snapshot: PageSnapshotDoc,
+        *,
+        department: str,
+        source_roster_url: str,
+        roster_title: str = "",
+        chunk_chars: int = 4000,
+    ) -> list[ProfessorDoc]:
+        """Archetype B: Extracts multiple professors directly from a single-page/inline table roster in bounded chunks."""
+        if not self.admin.enable_llm_extraction:
+            return []
+        md = snapshot.markdown or ""
+        if not md.strip():
+            return []
+        chunks = [md[i : i + chunk_chars] for i in range(0, min(len(md), chunk_chars * 4), chunk_chars)]
+        extracted: list[ProfessorDoc] = []
+        seen_names: set[str] = set()
+        for chunk_idx, chunk in enumerate(chunks):
+            sys_msg = (
+                "You extract multiple university faculty/supervisor records strictly verbatim from a roster table in Markdown. "
+                "Return ONLY valid JSON."
+            )
+            prompt = (
+                "Extract ALL professors/supervisors listed in this inline roster table chunk.\n"
+                'Return JSON ONLY: {"professors": [{"name": str, "name_en": str, "title": str, "title_en": str, '
+                '"email": str, "degree_eligibility": ["masters"|"phd"], "research_interests": [str], '
+                '"name_evidence_quote": str, "supervisor_evidence_quote": str}]}\n'
+                f"Parent Verified Roster: {source_roster_url} ({roster_title})\n"
+                f"Markdown:\n{chunk}"
+            )
+            llm_res = await self.router.complete(
+                [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+                json_mode=True,
+                max_tokens=900,
+                stage="phase2_inline_table",
+                original_markdown_chars=len(md),
+                sent_markdown_chars=len(chunk),
+            )
+            if not llm_res.ok:
+                continue
+            try:
+                m = re.search(r"\{.*\}", str(llm_res.data.get("content") or ""), re.S)
+                parsed = json.loads(m.group(0)) if m else {}
+                items = parsed.get("professors") or []
+            except Exception:
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name or name in seen_names:
+                    continue
+                nq = str(item.get("name_evidence_quote") or name).strip()
+                sq = str(item.get("supervisor_evidence_quote") or "roster_context").strip()
+                ok_g, _ = verify_grounding(chunk, snapshot.breadcrumb, nq, sq, source_roster_url=source_roster_url, roster_title=roster_title)
+                if not ok_g:
+                    continue
+                raw_degs = [str(d) for d in (item.get("degree_eligibility") or [])]
+                valid_degs = filter_negated_degrees(chunk, snapshot.breadcrumb, raw_degs) or _roster_implies_degrees(source_roster_url, roster_title) or ["masters"]
+                raw_em = decode_obfuscated_email(str(item.get("email") or ""))
+                email = raw_em if is_valid_email(raw_em) else ""
+                prof = ProfessorDoc(
+                    canonical_profile_url=f"{source_roster_url.split('#')[0]}#inline-{chunk_idx}-{name}",
+                    university_domain=snapshot.domain,
+                    department=department,
+                    source_roster_url=source_roster_url,
+                    name=name,
+                    name_en=str(item.get("name_en") or name).strip(),
+                    title=str(item.get("title") or "").strip(),
+                    title_en=str(item.get("title_en") or item.get("title") or "").strip(),
+                    email=email,
+                    email_status="FOUND" if email else "MISSING",
+                    degree_eligibility=valid_degs,
+                    research_interests=[str(x).strip() for x in (item.get("research_interests") or []) if str(x).strip()][:8],
+                    research_areas_en=[str(x).strip() for x in (item.get("research_interests") or []) if str(x).strip()][:8],
+                    photo_url="",
+                    name_evidence_quote=nq,
+                    supervisor_evidence_quote=sq,
+                    grounding_status="VERIFIED",
+                    status="ACTIVE",
+                )
+                await self.repo.upsert_professor(prof)
+                seen_names.add(name)
+                extracted.append(prof)
+        return extracted
 
     async def _route_needs_review(
         self,

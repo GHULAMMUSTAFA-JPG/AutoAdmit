@@ -17,6 +17,7 @@ from app.core.types import ErrorCode, StepResult
 from app.db.repositories import Repository
 from app.schemas.entities import (
     ApiCallTraceDoc,
+    DomainPlaybookDoc,
     HttpFetchTraceDoc,
     SiteTreeNode,
     UniversitySiteTreeDoc,
@@ -28,6 +29,8 @@ from app.services.nav_agent import _default_playwright_fetch
 from app.services.phase1_discovery import DEGREE_ZH, decode_bytes_safely
 from app.services.phase2_scraper import (
     CAROUSEL_SELECTORS,
+    clean_html_to_markdown,
+    detect_inline_table_roster,
     extract_breadcrumb_markers,
     is_root_or_index_url,
     is_same_root_domain,
@@ -49,7 +52,10 @@ BODY_NOISE_PATTERNS = (
     "/publications",
 )
 SCHOOLS_DIR_KEYWORDS = ("院系设置", "学院设置", "学部院系", "机构设置", "教学单位", "schools", "colleges", "departments", "faculties")
-FACULTY_BRANCH_KEYWORDS = ("师资", "教师", "导师", "在职教师", "博导", "硕导", "faculty", "people", "staff", "teachers", "supervisors")
+FACULTY_BRANCH_KEYWORDS = (
+    "师资", "教师", "导师", "在职教师", "博导", "硕导", "faculty", "people", "staff", "teachers", "supervisors",
+    "/szdw", "/jsml", "/yjsds", "/dsjj", "/dsjs", "teacherlist",
+)
 ENGLISH_BROCHURE_PREFIXES = ("ev.", "en.", "english.", "intl.", "iso.")
 BLOCKED_SUBDOMAIN_PREFIXES = (
     "stuex.", "iczu.", "iso.", "sie.", "admission.", "gs.", "hr.", "lib.", "news.", "alumni.",
@@ -63,16 +69,55 @@ NON_CS_COLLEGE_KEYWORDS = (
     "医学院", "法学院", "经济", "管理", "外文", "新闻", "历史", "哲学", "艺术", "体育", "农学",
     "物理", "化学", "生物", "medical", "law", "business", "physics.", "shmc.",
 )
-CS_HOST_PATH_TOKENS = ("cs.", "scs.", "cse.", "computer.", "it.", "jsj.", "xxgc.", "ai.", "computing.", "/cs/", "/cse/", "/computer/", "/jsj/")
+CS_HOST_PATH_TOKENS = (
+    "cs.", "scs.", "cse.", "computer.", "it.", "jsj.", "jsjyxxgc.", "xxgc.", "jxxy.", "rjxy.",
+    "wlxy.", "dsj.", "ai.", "znkx.", "software.", "computing.", "sai.", "ci.",
+    "/cs/", "/scs/", "/cse/", "/computer/", "/it/", "/jsj/", "/jsjyxxgc/", "/xxgc/",
+    "/jxxy/", "/rjxy/", "/wlxy/", "/dsj/", "/ai/", "/znkx/", "/software/",
+)
 FACULTY_TITLE_DENSITY_WORDS = ("教授", "副教授", "讲师", "博导", "硕导", "研究员", "professor", "associate professor", "assistant professor")
 
 DEPT_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "computer science": ("computer", "计算机", "计算", "cs.", "cse.", "scs.", "jsj.", "computing."),
-    "artificial intelligence": ("artificial intelligence", "人工智能", "智能", "ai."),
-    "software engineering": ("software", "软件", "se."),
-    "cyber security": ("cyber", "网络空间安全", "信息安全", "网安"),
-    "electronic information": ("electronic", "电子", "信息", "ee."),
+    "computer science": (
+        "computer", "计算机", "计算", "cs.", "cse.", "scs.", "jsj.", "jsjyxxgc",
+        "xxgc", "jxxy", "rjxy", "wlxy", "dsj", "znkx", "software", "computing.", "人工智能",
+    ),
+    "artificial intelligence": ("artificial intelligence", "人工智能", "智能", "ai.", "sai.", "znkx"),
+    "software engineering": ("software", "软件", "se.", "rjxy"),
+    "cyber security": ("cyber", "网络空间安全", "信息安全", "网安", "wlxy"),
+    "electronic information": ("electronic", "电子", "信息", "ee.", "xxgc", "jxxy"),
 }
+
+
+def detect_cms_fingerprint(url: str, html: str = "") -> str:
+    """Identifies common Chinese university CMS fingerprints for self-learning domain playbooks."""
+    low_u = (url or "").lower()
+    low_h = (html or "")[:6000].lower()
+    if "tsites" in low_u or "teacherlist.jsp" in low_u or "faculty." in low_u:
+        return "tsites_jsp"
+    if "/list.htm" in low_u or "/list.psp" in low_u or "_t" in low_u or "webplus" in low_h:
+        return "webplus_list"
+    if "/info/" in low_u or "vsb" in low_h or "system/resource" in low_h:
+        return "vsb_info"
+    return "unknown"
+
+
+def _url_inherits_dept_scope(url: str, inherited_dept_url: str | None) -> bool:
+    """Parent-Hop Department Scope Inheritance: child URLs under a confirmed department host/path prefix inherit in-scope status."""
+    if not inherited_dept_url or not url:
+        return False
+    pu = urlparse(url)
+    pd = urlparse(inherited_dept_url)
+    if pu.netloc.lower() != pd.netloc.lower():
+        return False
+    dept_path = (pd.path or "/").rstrip("/").lower()
+    cur_path = (pu.path or "/").lower()
+    # Dedicated department subdomain (e.g. cs.ahu.edu.cn, jxxy.aufe.edu.cn)
+    if not dept_path or dept_path in ("", "/index.htm", "/index.html"):
+        return not pu.netloc.lower().startswith("www.")
+    # Path-prefixed department under www (e.g. www.ahpu.edu.cn/jsjyxxgc/ -> /jsjyxxgc/5476/list.htm)
+    dept_dir = dept_path.rsplit("/", 1)[0] if "." in dept_path.rsplit("/", 1)[-1] else dept_path
+    return bool(dept_dir) and cur_path.startswith(dept_dir)
 
 
 def is_english_brochure_host(url: str) -> bool:
@@ -109,10 +154,18 @@ def is_blocked_academic_link(url: str, label: str = "", department: str = "") ->
     return False
 
 
-def matches_department_scope(url: str, html: str, department: str) -> bool:
-    """Requires candidate roster URL to match target department host/path OR mention the department in title/breadcrumb."""
+def matches_department_scope(
+    url: str,
+    html: str,
+    department: str,
+    *,
+    inherited_dept_url: str | None = None,
+) -> bool:
+    """Requires candidate roster URL to match target department host/path, inherit parent dept scope, or mention department in breadcrumb."""
     dept_low = (department or "").strip().lower()
     if not dept_low:
+        return True
+    if _url_inherits_dept_scope(url, inherited_dept_url):
         return True
     url_low = (url or "").lower()
     syns = DEPT_SYNONYMS.get(dept_low, (dept_low,))
@@ -373,57 +426,73 @@ class SiteTreeBuilder:
             logger.warning("tree_robots_check_failed", robots_url=robots_url, error=str(exc))
             return True
 
-    async def _fetch_page(self, client: httpx.AsyncClient, url: str) -> tuple[int, str, str]:
+    async def _fetch_page(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        prefer_playwright: bool = False,
+    ) -> tuple[int, str, str, bool]:
+        """Fetches page via httpx (or Playwright first if playbook learned WAF), records markdown_chars, returns (st, url, html, waf_recovered)."""
         t0 = time.perf_counter()
         dom = current_domain.get() or registrable_domain(urlparse(url).netloc)
-        try:
-            resp = await client.get(
-                url,
-                headers={"User-Agent": settings.CRAWL_USER_AGENT},
-                follow_redirects=True,
-                timeout=15.0,
-            )
-            st, final_u, html = resp.status_code, str(resp.url), decode_bytes_safely(resp.content)
-            await self.repo.insert_http_fetch_trace(
-                HttpFetchTraceDoc(
-                    trace_id=f"ft_{uuid.uuid4().hex[:12]}",
-                    job_id=current_job_id.get() or "",
-                    domain=dom,
-                    stage="tree_fetch",
-                    url=final_u,
-                    engine="httpx",
-                    status_code=st,
-                    error_detail="" if st == 200 else f"HTTP {st}",
-                    html_bytes=len(resp.content),
-                    markdown_chars=0,
-                    latency_ms=int((time.perf_counter() - t0) * 1000),
-                )
-            )
-        except Exception as exc:
-            err_s = f"{type(exc).__name__}: {exc}"
-            logger.warning("tree_http_fetch_failed", url=url, error=err_s)
-            await self.repo.insert_http_fetch_trace(
-                HttpFetchTraceDoc(
-                    trace_id=f"ft_{uuid.uuid4().hex[:12]}",
-                    job_id=current_job_id.get() or "",
-                    domain=dom,
-                    stage="tree_fetch",
-                    url=url,
-                    engine="httpx",
-                    status_code=None,
-                    error_detail=err_s,
-                    html_bytes=0,
-                    markdown_chars=0,
-                    latency_ms=int((time.perf_counter() - t0) * 1000),
-                )
-            )
-            st, final_u, html = 0, url, ""
+        st, final_u, html = 0, url, ""
+        waf_recovered = False
 
-        if st in (0, 403, 412, 521) and self.admin.enable_playwright and self.playwright_fetcher is not None:
+        if not prefer_playwright:
+            try:
+                resp = await client.get(
+                    url,
+                    headers={"User-Agent": settings.CRAWL_USER_AGENT},
+                    follow_redirects=True,
+                    timeout=15.0,
+                )
+                st, final_u, html = resp.status_code, str(resp.url), decode_bytes_safely(resp.content)
+                md_len = len(clean_html_to_markdown(html)[0]) if html else 0
+                await self.repo.insert_http_fetch_trace(
+                    HttpFetchTraceDoc(
+                        trace_id=f"ft_{uuid.uuid4().hex[:12]}",
+                        job_id=current_job_id.get() or "",
+                        domain=dom,
+                        stage="tree_fetch",
+                        url=final_u,
+                        engine="httpx",
+                        status_code=st,
+                        error_detail="" if st == 200 else f"HTTP {st}",
+                        html_bytes=len(resp.content),
+                        markdown_chars=md_len,
+                        latency_ms=int((time.perf_counter() - t0) * 1000),
+                    )
+                )
+            except Exception as exc:
+                err_s = f"{type(exc).__name__}: {exc}"
+                logger.warning("tree_http_fetch_failed", url=url, error=err_s)
+                await self.repo.insert_http_fetch_trace(
+                    HttpFetchTraceDoc(
+                        trace_id=f"ft_{uuid.uuid4().hex[:12]}",
+                        job_id=current_job_id.get() or "",
+                        domain=dom,
+                        stage="tree_fetch",
+                        url=url,
+                        engine="httpx",
+                        status_code=None,
+                        error_detail=err_s,
+                        html_bytes=0,
+                        markdown_chars=0,
+                        latency_ms=int((time.perf_counter() - t0) * 1000),
+                    )
+                )
+                st, final_u, html = 0, url, ""
+
+        had_waf_status = st in (412, 202, 503, 521)
+        if (prefer_playwright or st in (0, 403, 412, 521)) and self.admin.enable_playwright and self.playwright_fetcher is not None:
             t_pw = time.perf_counter()
             try:
                 st, final_u, html = await self.playwright_fetcher(url)
-                logger.info("tree_playwright_waf_recovered", url=url, status=st)
+                if st == 200 and had_waf_status:
+                    waf_recovered = True
+                md_len_pw = len(clean_html_to_markdown(html)[0]) if html else 0
+                logger.info("tree_playwright_waf_recovered", url=url, status=st, waf_recovered=waf_recovered)
                 await self.repo.insert_http_fetch_trace(
                     HttpFetchTraceDoc(
                         trace_id=f"ft_{uuid.uuid4().hex[:12]}",
@@ -433,15 +502,15 @@ class SiteTreeBuilder:
                         url=final_u,
                         engine="playwright",
                         status_code=st,
-                        error_detail="",
+                        error_detail="" if st == 200 else f"HTTP {st}",
                         html_bytes=len((html or "").encode("utf-8")),
-                        markdown_chars=0,
+                        markdown_chars=md_len_pw,
                         latency_ms=int((time.perf_counter() - t_pw) * 1000),
                     )
                 )
             except Exception as exc:
                 logger.warning("tree_playwright_waf_failed", url=url, error=f"{type(exc).__name__}: {exc}")
-        return st, final_u, html
+        return st, final_u, html, waf_recovered
 
     async def _agentic_verify_roster(
         self,
@@ -450,20 +519,22 @@ class SiteTreeBuilder:
         department: str,
         degree: str,
         profile_urls: list[str],
+        *,
+        inherited_dept_url: str | None = None,
     ) -> tuple[bool, str]:
         """
         Cheap-First Heuristic -> Agentic LLM Roster Verification Gate:
-        1. Blocks admin/HR URLs and out-of-scope departments deterministically.
+        1. Blocks admin/HR URLs and out-of-scope departments deterministically (with Parent-Hop Scope Inheritance).
         2. Auto-approves high-confidence CS/dept faculty rosters via DOM + title density heuristic.
         3. Only calls LLM (`stage='roster_agent_verify'`) on ambiguous pages.
         """
         if is_admin_or_hr_url(url):
             return False, "Blocked admin/HR/undergrad URL"
-        if not matches_department_scope(url, html, department):
+        if not matches_department_scope(url, html, department, inherited_dept_url=inherited_dept_url):
             return False, f"URL/title outside target department scope '{department}'"
 
         h_score, confidence = score_roster_heuristic(html, url, department, len(profile_urls))
-        if confidence == "HIGH_AUTO_APPROVE":
+        if confidence == "HIGH_AUTO_APPROVE" or (inherited_dept_url and h_score >= 3 and len(profile_urls) >= 3):
             return True, f"cheap_heuristic_auto_approved (score={h_score}, profiles={len(profile_urls)})"
 
         # Ambiguous page -> ask Agentic LLM Roster Gate
@@ -550,10 +621,11 @@ class SiteTreeBuilder:
                 parsed = json.loads(m.group(0)) if m else {}
                 raw_branches = parsed.get("branches") or []
                 valid_urls = {it["url"]: it for z in zones.values() for it in z}
+                cur_norm = url.rstrip("/")
                 chosen: list[dict[str, str]] = []
                 for b in raw_branches:
                     bu = str(b.get("url") or "").strip()
-                    if bu in valid_urls and bu not in {c["url"] for c in chosen}:
+                    if bu in valid_urls and bu.rstrip("/") != cur_norm and bu not in {c["url"] for c in chosen}:
                         chosen.append(valid_urls[bu])
                 if chosen:
                     # Down-rank English brochure subdomains below Chinese portals
@@ -691,19 +763,28 @@ class SiteTreeBuilder:
         for cand_url in ranked_urls:
             if is_admin_or_hr_url(cand_url):
                 continue
-            st, final_u, html = await self._fetch_page(client, cand_url)
+            st, final_u, html, _ = await self._fetch_page(client, cand_url)
             if st != 200:
                 continue
             ok_gate, profiles = verify_roster_html(html, final_u, root_domain=domain, min_profiles=3)
+            roster_mode = "BIO_LINKS"
             agent_ok, agent_reason = (False, "failed_profile_count_gate")
             if ok_gate:
                 agent_ok, agent_reason = await self._agentic_verify_roster(final_u, html, department, degree, profiles)
-            logger.info("serper_gate_check", domain=domain, url=final_u, passed=agent_ok, profile_count=len(profiles), reason=agent_reason)
+            elif matches_department_scope(final_u, html, department):
+                is_inline, inline_hits = detect_inline_table_roster(html, final_u)
+                if is_inline:
+                    ok_gate = True
+                    agent_ok = True
+                    roster_mode = "INLINE_TABLE"
+                    agent_reason = f"inline_table_roster_detected (rank_hits={inline_hits})"
+            logger.info("serper_gate_check", domain=domain, url=final_u, passed=agent_ok, profile_count=len(profiles), roster_mode=roster_mode, reason=agent_reason)
             if ok_gate and agent_ok:
                 return StepResult.success({
                     "roster_url": final_u,
                     "department_url": final_u,
                     "strategy": "SERPER_LLM_FALLBACK",
+                    "roster_mode": roster_mode,
                     "candidate_profile_count": len(profiles),
                     "hops": 1,
                 })
@@ -732,6 +813,10 @@ class SiteTreeBuilder:
         tree = await self.repo.get_site_tree(clean_dom)
         if tree is None:
             tree = UniversitySiteTreeDoc(domain=clean_dom, root_url=root_url)
+        playbook = await self.repo.get_domain_playbook(clean_dom)
+        prefer_pw = bool(playbook and playbook.requires_playwright_waf_reload)
+        learned_waf_reload = prefer_pw
+        learned_cms = playbook.cms_fingerprint if playbook else "unknown"
 
         # Step 0A: Verified roster cache hit ($0)
         if not force_refresh and roster_key in tree.verified_rosters:
@@ -741,6 +826,7 @@ class SiteTreeBuilder:
                 "roster_url": cached.roster_url,
                 "department_url": cached.department_url or cached.roster_url,
                 "strategy": "TREE_CACHE",
+                "roster_mode": getattr(cached, "roster_mode", "BIO_LINKS"),
                 "candidate_profile_count": cached.candidate_profile_count,
                 "hops": 0,
                 "tree": tree,
@@ -782,13 +868,15 @@ class SiteTreeBuilder:
                 parent_url: str | None,
                 dept_url_seen: str | None,
             ) -> dict[str, Any] | None:
-                nonlocal hops_taken
+                nonlocal hops_taken, learned_waf_reload, learned_cms
                 if depth > self.max_depth or cur_url in visited:
                     return None
                 visited.add(cur_url)
                 hops_taken += 1
 
-                st, final_u, html = await self._fetch_page(client, cur_url)
+                st, final_u, html, waf_rec = await self._fetch_page(client, cur_url, prefer_playwright=prefer_pw)
+                if waf_rec:
+                    learned_waf_reload = True
                 if st != 200 or not html:
                     _record_node(cur_url, cur_label, cur_zone, depth, "DEAD_END", parent_url)
                     nav_trail.append({
@@ -796,6 +884,9 @@ class SiteTreeBuilder:
                         "chosen_link": cur_label, "gate_result": "FAIL", "rejection_reason": f"HTTP {st}",
                     })
                     return None
+                cms_det = detect_cms_fingerprint(final_u, html)
+                if cms_det != "unknown":
+                    learned_cms = cms_det
 
                 t_node = LexborHTMLParser(html).css_first("title")
                 page_title = t_node.text(strip=True)[:120] if t_node else ""
@@ -839,10 +930,20 @@ class SiteTreeBuilder:
                     min_profiles=3,
                     node_type=inferred_node_type,
                 )
+                roster_mode = "BIO_LINKS"
                 agent_ok, agent_reason = (False, "below_min_profiles_or_entry_page")
                 if ok_gate:
-                    agent_ok, agent_reason = await self._agentic_verify_roster(final_u, html, department, degree, profiles)
-                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, node_type=inferred_node_type, passed=(ok_gate and agent_ok), profiles=len(profiles), reason=agent_reason)
+                    agent_ok, agent_reason = await self._agentic_verify_roster(
+                        final_u, html, department, degree, profiles, inherited_dept_url=dept_url_seen
+                    )
+                elif inferred_node_type == "FACULTY_SECTION" and matches_department_scope(final_u, html, department, inherited_dept_url=dept_url_seen):
+                    is_inline, inline_hits = detect_inline_table_roster(html, final_u)
+                    if is_inline:
+                        ok_gate = True
+                        agent_ok = True
+                        roster_mode = "INLINE_TABLE"
+                        agent_reason = f"inline_table_roster_detected (rank_hits={inline_hits})"
+                logger.info("tree_dfs_gate", domain=clean_dom, depth=depth, url=final_u, node_type=inferred_node_type, passed=(ok_gate and agent_ok), profiles=len(profiles), roster_mode=roster_mode, reason=agent_reason)
                 if ok_gate and agent_ok:
                     _record_node(final_u, cur_label, cur_zone, depth, "VERIFIED_ROSTER", parent_url)
                     nav_trail.append({
@@ -853,6 +954,7 @@ class SiteTreeBuilder:
                         "roster_url": final_u,
                         "department_url": dept_url_seen or final_u,
                         "strategy": "TREE_DFS",
+                        "roster_mode": roster_mode,
                         "candidate_profile_count": len(profiles),
                         "hops": hops_taken,
                     }
@@ -896,16 +998,21 @@ class SiteTreeBuilder:
 
             winner: dict[str, Any] | None = None
 
-            # Step 0B: Jump straight to Hop 2 if departments_map already has the target department URL
-            cached_dept_url = _match_department_from_map(tree.departments_map, department)
+            # Step 0B: Jump straight to Hop 2 if playbook or departments_map already has the target department URL
+            cached_dept_url = (playbook.verified_dept_url if (playbook and playbook.verified_dept_url) else None) or _match_department_from_map(tree.departments_map, department)
             if cached_dept_url and not force_refresh:
                 logger.info("tree_dept_map_jump", domain=clean_dom, dept_url=cached_dept_url)
                 winner = await _dfs(cached_dept_url, department, "BODY", 2, root_url, cached_dept_url)
 
             # Hop 0: Pruned BFS on homepage -> Top 3 ranked branches -> DFS with backtracking
             if not winner:
-                st0, final0, html0 = await self._fetch_page(client, root_url)
+                st0, final0, html0, waf0 = await self._fetch_page(client, root_url, prefer_playwright=prefer_pw)
+                if waf0:
+                    learned_waf_reload = True
                 if st0 == 200 and html0:
+                    cms0 = detect_cms_fingerprint(final0, html0)
+                    if cms0 != "unknown":
+                        learned_cms = cms0
                     _record_node(final0, clean_dom, "NAV", 0, "HOME", None)
                     zones0, home_nav_type = extract_3zone_links_with_meta(html0, final0, clean_dom, department=department)
                     tree.nav_type = home_nav_type  # type: ignore[assignment]
@@ -947,10 +1054,35 @@ class SiteTreeBuilder:
                     roster_url=winner["roster_url"],
                     department_url=winner.get("department_url"),
                     strategy=winner["strategy"],
+                    roster_mode=winner.get("roster_mode", "BIO_LINKS"),
                     candidate_profile_count=winner.get("candidate_profile_count", 0),
                     verified_at=utc_now(),
                 )
             await self.repo.upsert_site_tree(tree)
+
+            # Self-learning CMS & Domain Playbook persistence
+            try:
+                existing_rosters = list(playbook.verified_roster_urls) if playbook else []
+                if winner and winner["roster_url"] not in existing_rosters:
+                    existing_rosters.append(winner["roster_url"])
+                await self.repo.upsert_domain_playbook(
+                    DomainPlaybookDoc(
+                        domain=clean_dom,
+                        cms_fingerprint=learned_cms,
+                        requires_playwright_waf_reload=learned_waf_reload,
+                        verified_dept_url=(winner.get("department_url") if winner else (playbook.verified_dept_url if playbook else "")) or "",
+                        verified_roster_urls=existing_rosters[-10:],
+                        roster_mode=(winner.get("roster_mode", "BIO_LINKS") if winner else (playbook.roster_mode if playbook else "BIO_LINKS")),
+                        last_failure_code="" if winner else ErrorCode.VERIFICATION_FAILED.value,
+                        learned_notes=(
+                            f"Verified via {winner['strategy']} ({winner.get('roster_mode', 'BIO_LINKS')})"
+                            if winner
+                            else "No verified roster found in last run"
+                        ),
+                    )
+                )
+            except Exception as exc:
+                logger.warning("domain_playbook_upsert_failed", domain=clean_dom, error=f"{type(exc).__name__}: {exc}")
 
             if winner:
                 winner["tree"] = tree

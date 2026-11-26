@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.schemas.entities import (
     ApiCallTraceDoc,
     BenchmarkRunDoc,
+    DomainPlaybookDoc,
     HttpFetchTraceDoc,
     JobDoc,
     NeedsReviewDoc,
@@ -444,6 +445,34 @@ class Repository:
         async for doc in cursor:
             doc.pop("_id", None)
             out.append(Phase2LinkAuditDoc(**doc))
+        return out
+
+    # ------------------------------------------------------------------ domain_playbooks (self-learning memory)
+    async def upsert_domain_playbook(self, playbook: DomainPlaybookDoc) -> None:
+        playbook.domain = playbook.domain.lower().strip()
+        playbook.updated_at = utc_now()
+        await self.db["domain_playbooks"].update_one(
+            {"domain": playbook.domain},
+            {"$set": playbook.model_dump()},
+            upsert=True,
+        )
+
+    async def get_domain_playbook(self, domain: str) -> DomainPlaybookDoc | None:
+        doc = await self.db["domain_playbooks"].find_one({"domain": domain.lower().strip()})
+        if not doc:
+            return None
+        doc.pop("_id", None)
+        return DomainPlaybookDoc(**doc)
+
+    async def list_domain_playbooks(self, *, cms_fingerprint: str | None = None, limit: int = 200) -> list[DomainPlaybookDoc]:
+        query: dict[str, Any] = {}
+        if cms_fingerprint:
+            query["cms_fingerprint"] = cms_fingerprint
+        cursor = self.db["domain_playbooks"].find(query).sort("updated_at", -1).limit(limit)
+        out: list[DomainPlaybookDoc] = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            out.append(DomainPlaybookDoc(**doc))
         return out
 
     # ------------------------------------------------------------------ system_state (persisted runtime config)
