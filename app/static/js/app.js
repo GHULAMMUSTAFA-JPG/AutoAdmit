@@ -74,20 +74,35 @@ function copyText(text) {
 // Data Export Helpers (Universities & Per-University Professors)
 // =========================================================================
 function downloadUniversities(fmt = "csv") {
-  window.location.href = `/api/v1/export/universities?format=${encodeURIComponent(fmt)}`;
-  showToast(`Downloading universities (${fmt.toUpperCase()})...`);
+  const region = (document.getElementById("f-regions")?.value || "").trim();
+  const params = new URLSearchParams({ format: fmt, worked_only: "true" });
+  if (region) params.set("region", region);
+  window.location.href = `/api/v1/export/universities?${params.toString()}`;
+  showToast(`Downloading worked universities${region ? ` (${region})` : ""} (${fmt.toUpperCase()})...`);
 }
 
 function downloadProfessors(domain = "", fmt = "csv") {
   const params = new URLSearchParams({ format: fmt });
-  if (domain) params.set("domain", domain);
+  if (domain) {
+    params.set("domain", domain);
+  } else {
+    const region = (document.getElementById("f-regions")?.value || "").trim();
+    if (region) params.set("region", region);
+  }
   window.location.href = `/api/v1/export/professors?${params.toString()}`;
-  showToast(`Downloading professors${domain ? ` for ${domain}` : " (all)"} (${fmt.toUpperCase()})...`);
+  showToast(`Downloading professors${domain ? ` for ${domain}` : ""} (${fmt.toUpperCase()})...`);
 }
 
 function downloadFilteredProfessors(fmt = "csv") {
   const dom = document.getElementById("prof-domain-filter")?.value || "";
   downloadProfessors(dom, fmt);
+}
+
+function downloadRunLogsZip() {
+  const jid = (document.getElementById("analytics-job-id")?.value || document.getElementById("log-job-id")?.value || state.activeJobId || "").trim();
+  const q = jid ? `?job_id=${encodeURIComponent(jid)}` : "";
+  window.location.href = `/api/v1/export/run-logs-zip${q}`;
+  showToast(`Downloading complete Run Logs ZIP${jid ? ` (${jid})` : ""}...`);
 }
 
 function downloadDebugBundle() {
@@ -509,48 +524,105 @@ async function loadProfessors() {
       profs = profs.filter(p => regionDomains.has((p.university_domain || "").toLowerCase()));
     }
     document.getElementById("tab-count-profs").textContent = profs.length;
-    const tbody = document.getElementById("prof-table-body");
+    const container = document.getElementById("prof-grouped-container");
+    if (!container) return;
     if (!profs.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No verified professors match filters.</td></tr>`;
+      container.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:24px;">No verified professors match filters.</div>`;
       return;
     }
-    tbody.innerHTML = profs.map(p => {
-      const nameEn = p.name_en || p.name || "";
-      const nameZh = p.name && p.name !== nameEn ? p.name : "";
-      const titleEn = p.title_en || p.title || "—";
-      const inits = esc(_initials(nameEn, p.name));
-      const avatarHtml = p.photo_url
-        ? `<img class="prof-avatar" src="${esc(p.photo_url)}" alt="${inits}" onerror="this.outerHTML='<span class=\\'prof-avatar-fallback\\'>${inits}</span>'" />`
-        : `<span class="prof-avatar-fallback">${inits}</span>`;
-      const emailCls = p.email_status === "FOUND" ? "p12-badge-ok" : "p12-badge-warn";
-      const degs = (p.degree_eligibility || []).map(d => `<span class="p12-badge p12-badge-info">${esc(d)}</span>`).join(" ");
-      const areas = (p.research_areas_en && p.research_areas_en.length ? p.research_areas_en : (p.research_interests || [])).slice(0, 4);
-      const topics = areas.map(t => `<span class="p12-badge p12-badge-muted" style="margin:1px;">${esc(t)}</span>`).join(" ");
-      const copyBtn = p.email ? `<button class="copy-btn" onclick="copyText('${esc(p.email)}')" title="Copy email">&#128203;</button>` : "";
-      return `
-        <tr>
-          <td>
-            <div class="prof-cell">
-              ${avatarHtml}
-              <div>
-                <div style="font-weight:700; color:var(--text-primary);">${esc(nameEn)}</div>
-                ${nameZh ? `<div style="font-size:11.5px; color:var(--text-secondary);">${esc(nameZh)}</div>` : ""}
-                <a href="${esc(p.canonical_profile_url)}" target="_blank" rel="noopener" style="font-size:11px; color:var(--primary);">Profile &nearr;</a>
+
+    // Group professors by university_domain (showing uni name, Chinese name, region, count; click to expand)
+    const uniMeta = {};
+    for (const u of state.universities || []) {
+      uniMeta[(u.domain || "").toLowerCase()] = u;
+    }
+    const groups = new Map();
+    for (const p of profs) {
+      const dom = (p.university_domain || "unknown").toLowerCase();
+      if (!groups.has(dom)) groups.set(dom, []);
+      groups.get(dom).push(p);
+    }
+
+    const autoOpen = Boolean(search || domain || groups.size === 1);
+    const orderedGroups = [...groups.entries()].sort((a, b) => {
+      const ra = uniMeta[a[0]]?.rank ?? 9999;
+      const rb = uniMeta[b[0]]?.rank ?? 9999;
+      return ra - rb || b[1].length - a[1].length;
+    });
+
+    container.innerHTML = orderedGroups.map(([dom, list]) => {
+      const meta = uniMeta[dom] || {};
+      const uniTitle = meta.name || dom;
+      const uniZh = meta.chinese_name ? ` (${meta.chinese_name})` : "";
+      const uniRegion = meta.region || "China";
+      const rowsHtml = list.map(p => {
+        const nameEn = p.name_en || p.name || "";
+        const nameZh = p.name && p.name !== nameEn ? p.name : "";
+        const titleEn = p.title_en || p.title || "—";
+        const inits = esc(_initials(nameEn, p.name));
+        const avatarHtml = p.photo_url
+          ? `<img class="prof-avatar" src="${esc(p.photo_url)}" alt="${inits}" onerror="this.outerHTML='<span class=\\'prof-avatar-fallback\\'>${inits}</span>'" />`
+          : `<span class="prof-avatar-fallback">${inits}</span>`;
+        const emailCls = p.email_status === "FOUND" ? "p12-badge-ok" : "p12-badge-warn";
+        const degs = (p.degree_eligibility || []).map(d => `<span class="p12-badge p12-badge-info">${esc(d)}</span>`).join(" ");
+        const areas = (p.research_areas_en && p.research_areas_en.length ? p.research_areas_en : (p.research_interests || [])).slice(0, 4);
+        const topics = areas.map(t => `<span class="p12-badge p12-badge-muted" style="margin:1px;">${esc(t)}</span>`).join(" ");
+        const copyBtn = p.email ? `<button class="copy-btn" onclick="copyText('${esc(p.email)}')" title="Copy email">&#128203;</button>` : "";
+        return `
+          <tr>
+            <td>
+              <div class="prof-cell">
+                ${avatarHtml}
+                <div>
+                  <div style="font-weight:700; color:var(--text-primary);">${esc(nameEn)}</div>
+                  ${nameZh ? `<div style="font-size:11.5px; color:var(--text-secondary);">${esc(nameZh)}</div>` : ""}
+                  <a href="${esc(p.canonical_profile_url)}" target="_blank" rel="noopener" style="font-size:11px; color:var(--primary);">Profile &nearr;</a>
+                </div>
               </div>
+            </td>
+            <td><div class="line-clamp-2" title="${esc(titleEn)}">${esc(titleEn)}</div></td>
+            <td><div style="font-size:11.5px; color:var(--text-secondary);">${esc(p.department)}</div></td>
+            <td>${degs || "—"}</td>
+            <td style="max-width:220px;">${topics || "—"}</td>
+            <td>
+              <div style="display:flex; align-items:center;"><code>${esc(p.email || "—")}</code>${copyBtn}</div>
+              <span class="p12-badge ${emailCls}" style="margin-top:3px;">${esc(p.email_status)}</span>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      return `
+        <div class="prof-uni-group ${autoOpen ? "open" : ""}">
+          <div class="prof-uni-hdr" onclick="this.parentElement.classList.toggle('open')">
+            <div>
+              <span class="prof-uni-chev">&#9654;</span>
+              <strong>${esc(uniTitle)}</strong><span style="color:var(--text-secondary);">${esc(uniZh)}</span>
+              <span class="p12-badge p12-badge-muted" style="margin-left:6px;">${esc(uniRegion)}</span>
+              <code style="margin-left:6px; font-size:11px; color:var(--text-muted);">${esc(dom)}</code>
             </div>
-          </td>
-          <td><div class="line-clamp-2" title="${esc(titleEn)}">${esc(titleEn)}</div></td>
-          <td>
-            <code>${esc(p.university_domain)}</code>
-            <div style="font-size:11px; color:var(--text-secondary);">${esc(p.department)}</div>
-          </td>
-          <td>${degs || "—"}</td>
-          <td style="max-width:220px;">${topics || "—"}</td>
-          <td>
-            <div style="display:flex; align-items:center;"><code>${esc(p.email || "—")}</code>${copyBtn}</div>
-            <span class="p12-badge ${emailCls}" style="margin-top:3px;">${esc(p.email_status)}</span>
-          </td>
-        </tr>
+            <div style="display:flex; align-items:center; gap:6px;" onclick="event.stopPropagation()">
+              <span class="p12-badge p12-badge-ok">${list.length} prof${list.length > 1 ? "s" : ""}</span>
+              <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(dom)}', 'csv')">&#8681; CSV</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadProfessors('${esc(dom)}', 'json')">JSON</button>
+            </div>
+          </div>
+          <div class="prof-uni-body">
+            <table class="saas-table">
+              <thead>
+                <tr>
+                  <th>Professor (EN / ZH)</th>
+                  <th>Title</th>
+                  <th>Department</th>
+                  <th>Degree</th>
+                  <th>Research Areas (EN)</th>
+                  <th>Email &amp; Status</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
       `;
     }).join("");
   } catch (e) {

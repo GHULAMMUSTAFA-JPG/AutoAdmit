@@ -69,6 +69,15 @@
     .action-dropdown button { width: 100%; text-align: left; border: none; background: transparent; padding: 7px 10px; font-size: 12px; color: var(--text-primary); border-radius: 6px; cursor: pointer; display: block; }
     .action-dropdown button:hover { background: #f1f5f9; color: var(--primary); }
 
+    /* Grouped Professor Accordion by University */
+    .prof-uni-group { border: 1px solid var(--border-subtle); border-radius: 10px; margin-bottom: 10px; overflow: hidden; background: #fff; }
+    .prof-uni-hdr { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 14px; background: #f8fafc; cursor: pointer; user-select: none; }
+    .prof-uni-hdr:hover { background: #f1f5f9; }
+    .prof-uni-body { display: none; border-top: 1px solid var(--border-subtle); overflow-x: auto; }
+    .prof-uni-group.open .prof-uni-body { display: block; }
+    .prof-uni-chev { font-size: 11px; color: var(--text-muted); margin-right: 6px; display: inline-block; transition: transform 0.15s; }
+    .prof-uni-group.open .prof-uni-chev { transform: rotate(90deg); }
+
     /* Analytics Provider Cards */
     .analytics-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
     @media (max-width: 1024px) { .analytics-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -238,6 +247,7 @@
             <div class="saas-btn-group">
               <button class="btn btn-secondary btn-sm" onclick="openAdminLogsDrawer(true)">View Live Logs</button>
               <button class="btn btn-secondary btn-sm" onclick="downloadCurrentJobLogs()">&#8681; Download .jsonl</button>
+              <button class="btn btn-primary btn-sm" onclick="downloadRunLogsZip()">&#128230; All Run Logs (.zip)</button>
             </div>
           </div>
         </div>
@@ -316,22 +326,10 @@
               <button class="btn btn-secondary btn-sm" onclick="downloadFilteredProfessors('json')">&#8681; Download Profs JSON</button>
             </div>
           </div>
-          <div class="saas-scroll-540">
-            <table class="saas-table">
-              <thead>
-                <tr>
-                  <th>Professor (EN / ZH)</th>
-                  <th>Title</th>
-                  <th>University &amp; Dept</th>
-                  <th>Degree</th>
-                  <th>Research Areas (EN)</th>
-                  <th>Email &amp; Status</th>
-                </tr>
-              </thead>
-              <tbody id="prof-table-body">
-                <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">No professors extracted yet.</td></tr>
-              </tbody>
-            </table>
+          <div class="saas-scroll-540" style="padding:10px; background:#f8fafc;">
+            <div id="prof-grouped-container">
+              <div style="text-align:center; color:var(--text-muted); padding:24px;">No professors extracted yet.</div>
+            </div>
           </div>
         </div>
 
@@ -399,6 +397,7 @@
               <button class="btn btn-primary btn-sm" onclick="loadAnalytics()">&#8635; Refresh Analytics</button>
               <button id="btn-refresh-conns" class="btn btn-secondary btn-sm" onclick="refreshConnections(this)">&#9889; Refresh Connections</button>
               <button class="btn btn-secondary btn-sm" onclick="clearAnalyticsTraces()">&#128465; Clear Old Traces</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadRunLogsZip()">&#128230; All Run Logs (.zip)</button>
               <button class="btn btn-secondary btn-sm" onclick="downloadDebugBundle()">&#128230; Debug Bundle JSON</button>
             </div>
             <div class="tab-toolbar-group">
